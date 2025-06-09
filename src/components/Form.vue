@@ -80,6 +80,55 @@ const updateProgressPercent = () => {
     )
   )
 }
+
+const formatXhsDataToFields = (xhsData, allFields) => {
+  const fieldMap = {}
+  for (const field of allFields) {
+    switch (field.name) {
+      case '博主':
+        fieldMap[field.id] = xhsData.author
+        break
+      case '笔记标题':
+        fieldMap[field.id] = xhsData.title
+        break
+      case '笔记内容':
+        fieldMap[field.id] = xhsData.content
+        break
+      case '点赞量':
+        fieldMap[field.id] = xhsData.like_count
+        break
+      case '评论量':
+        fieldMap[field.id] = xhsData.comment_count
+        break
+      case '收藏量':
+        fieldMap[field.id] = xhsData.collected_count
+        break
+      case '转发量':
+        fieldMap[field.id] = xhsData.share_count
+        break
+      case '位置':
+        fieldMap[field.id] = xhsData.location
+        break
+      case '笔记发布时间':
+        // 时间戳转 ISO 字符串或 Date 对象
+        fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
+        break
+      case '笔记话题':
+        fieldMap[field.id] = xhsData.tag_list?.join(', ') ?? ''
+        break
+      case '图片链接':
+        fieldMap[field.id] = xhsData.images_link?.slice(0, 3).join(', ') ?? ''
+        break
+      case '视频链接':
+        fieldMap[field.id] = xhsData.video_url ?? ''
+        break
+      default:
+        break
+    }
+  }
+  return fieldMap
+}
+
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
 
 const updateRecords = async () => {
@@ -147,12 +196,14 @@ const updateRecords = async () => {
           progress.value.failed++
           updateProgress(`记录 ${recordId} 失败：接口返回为空`)
         } else {
-          const updateFields = {}
-          for (const field of allFields) {
-            if (xhsData[field.name] !== undefined) {
-              updateFields[field.id] = xhsData[field.name]
-            }
-          }
+          // const updateFields = {}
+          // for (const field of allFields) {
+          //   if (xhsData[field.name] !== undefined) {
+          //     updateFields[field.id] = xhsData[field.name]
+          //   }
+          // }
+          const updateFields = formatXhsDataToFields(xhsData, allFields)
+
 
           if (Object.keys(updateFields).length > 0) {
             await table.setRecord(recordId, { fields: updateFields })
