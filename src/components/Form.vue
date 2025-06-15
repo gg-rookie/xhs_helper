@@ -250,17 +250,7 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
                   
                   // 使用代理服务器获取图片
                   const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
-                  
-                  // 方法1：直接使用代理URL（推荐）
-                  return {
-                    url: proxyUrl,
-                    name,
-                    type,
-                    size: 0
-                  };
-                  
-                  // 方法2：如果需要下载图片再上传（不推荐，可能性能较差）
-                  /*
+
                   const response = await fetch(proxyUrl);
                   if (!response.ok) throw new Error('Failed to fetch image');
                   const blob = await response.blob();
@@ -269,7 +259,6 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
                     name, 
                     { type }
                   );
-                  */
                 } catch (e) {
                   console.error(`处理图片URL失败: ${url}`, e);
                   return null;
