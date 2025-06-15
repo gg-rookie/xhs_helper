@@ -81,6 +81,24 @@ const updateProgressPercent = () => {
   )
 }
 
+// 根据URL后缀获取MIME类型
+function getMimeTypeFromUrl(url) {
+  const extension = url.split('.').pop()?.toLowerCase();
+  switch(extension) {
+    case 'jpg':
+    case 'jpeg':
+      return 'image/jpeg';
+    case 'png':
+      return 'image/png';
+    case 'gif':
+      return 'image/gif';
+    case 'mp4':
+      return 'video/mp4';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
 const formatXhsDataToFields = (xhsData, allFields) => {
   const fieldMap = {}
   for (const field of allFields) {
@@ -114,11 +132,21 @@ const formatXhsDataToFields = (xhsData, allFields) => {
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
       case '笔记标签词':
-        fieldMap[field.id] = xhsData.tag_list?.join(', ') ?? ''
+        fieldMap[field.id] = xhsData.tag_list || []
         break
       case '笔记图片':
-        fieldMap[field.id] = xhsData.images_link?.slice(0, 3).join(', ') ?? ''
-        break
+        case '笔记图片':
+        // 附件字段 - 转换为飞书附件格式
+        if (xhsData.images_link?.length > 0) {
+          fieldMap[field.id] = xhsData.images_link.map(url => ({
+            url: url,
+            name: url.split('/').pop() || 'image.jpg',
+            type: getMimeTypeFromUrl(url) // 需要实现这个函数
+          }));
+        } else {
+          fieldMap[field.id] = [];
+        }
+        break;
       case '视频保存':
         fieldMap[field.id] = xhsData.video_url ?? ''
         break
