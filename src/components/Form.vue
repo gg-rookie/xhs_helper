@@ -156,6 +156,27 @@ function parseNumberWithUnits(input) {
   return num;
 }
 
+const uploadFileToBitable = async (url, filename) => {
+  try {
+    // 通过代理获取文件
+    const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
+    const response = await fetch(proxyUrl);
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
+    
+    const blob = await response.blob();
+    const file = new File([blob], filename, { type: blob.type });
+    
+    // 批量上传文件到飞书
+    const tokens = await bitable.base.batchUploadFile([file]);
+    if (!tokens || !tokens.length) throw new Error('No file token returned');
+    
+    return tokens[0];
+  } catch (error) {
+    console.error('文件上传失败:', error);
+    throw error;
+  }
+};
+
 const formatXhsDataToFields = async (xhsData, allFields, table) => {
   const fieldMap = {}
   for (const field of allFields) {
@@ -240,31 +261,32 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         break;
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
-          try {            
+          try {
+            // 获取附件字段实例
+            const attachmentField = await table.getField(field.id);
+            
+            // 上传所有图片并获取file_token
             const attachments = await Promise.all(
               xhsData.images_link.slice(0, 10).map(async (url) => {
                 try {
-                  // 获取文件名和类型
                   const name = url.split('/').pop() || `image_${Date.now()}.jpg`;
-                  const type = getMimeTypeFromUrl(url);
+                  const token = await uploadFileToBitable(url, name);
                   
-                  // 使用代理服务器获取图片
-                  const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
-
-                  const response = await fetch(proxyUrl);
-                  if (!response.ok) throw new Error('Failed to fetch image');
-                  const blob = await response.blob();
-                  return new File(
-                    [blob], 
-                    name, 
-                    { type }
-                  );
+                  return {
+                    name,
+                    type: getMimeTypeFromUrl(url),
+                    token,
+                    timeStamp: Date.now(),
+                    size: 0 // 实际大小可选
+                  };
                 } catch (e) {
                   console.error(`处理图片URL失败: ${url}`, e);
                   return null;
                 }
               })
             );
+            
+            // 过滤掉失败的上传
             fieldMap[field.id] = attachments.filter(Boolean);
           } catch (err) {
             console.error('初始化附件字段失败:', err);
