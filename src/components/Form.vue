@@ -156,26 +156,6 @@ function parseNumberWithUnits(input) {
   return num;
 }
 
-const uploadFileToBitable = async (url, filename) => {
-  try {
-    // 通过代理获取文件
-    const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
-    const response = await fetch(proxyUrl);
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`);
-    
-    const blob = await response.blob();
-    const file = new File([blob], filename, { type: blob.type });
-    
-    // 批量上传文件到飞书
-    const tokens = await bitable.base.batchUploadFile([file]);
-    if (!tokens || !tokens.length) throw new Error('No file token returned');
-    
-    return tokens[0];
-  } catch (error) {
-    console.error('文件上传失败:', error);
-    throw error;
-  }
-};
 
 const formatXhsDataToFields = async (xhsData, allFields, table) => {
   const fieldMap = {}
@@ -265,35 +245,52 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
             // 获取附件字段实例
             const attachmentField = await table.getField(field.id);
             
-            // 上传所有图片并获取file_token
-            const attachments = await Promise.all(
+            // 方法1：直接使用setValue方法上传文件（推荐）
+            const files = await Promise.all(
               xhsData.images_link.slice(0, 10).map(async (url) => {
                 try {
-                  const name = url.split('/').pop() || `image_${Date.now()}.jpg`;
-                  const token = await uploadFileToBitable(url, name);
+                  const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
+                  const response = await fetch(proxyUrl);
+                  if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
                   
-                  return {
-                    name,
-                    type: getMimeTypeFromUrl(url),
-                    token,
-                    timeStamp: Date.now(),
-                    size: 0 // 实际大小可选
-                  };
+                  const blob = await response.blob();
+                  const filename = url.split('/').pop() || `image_${Date.now()}.${blob.type.split('/')[1] || 'jpg'}`;
+                  return new File([blob], filename, { type: blob.type });
                 } catch (e) {
-                  console.error(`处理图片URL失败: ${url}`, e);
+                  console.error(`下载图片失败: ${url}`, e);
                   return null;
                 }
               })
             );
             
-            // 过滤掉失败的上传
-            fieldMap[field.id] = attachments.filter(Boolean);
+            // 过滤掉失败的下载
+            const validFiles = files.filter(Boolean);
+            
+            if (validFiles.length > 0) {
+              // 方法1A：使用setValue直接设置文件
+              await attachmentField.setValue(recordId, validFiles);
+              
+              // 或者方法1B：使用createCell创建单元格（适合新增记录）
+              // const cell = await attachmentField.createCell(validFiles);
+              // await table.setRecord(recordId, { fields: { [field.id]: cell } });
+            }
+            
+            // 方法2：使用batchUploadFile获取token再设置（备选方案）
+            /*
+            const tokens = await bitable.base.batchUploadFile(validFiles);
+            const attachments = tokens.map((token, index) => ({
+              name: validFiles[index].name,
+              type: validFiles[index].type,
+              token,
+              timeStamp: Date.now(),
+              size: validFiles[index].size || 0
+            }));
+            fieldMap[field.id] = attachments;
+            */
+            
           } catch (err) {
-            console.error('初始化附件字段失败:', err);
-            fieldMap[field.id] = [];
+            console.error('处理附件字段失败:', err);
           }
-        } else {
-          fieldMap[field.id] = [];
         }
         break;
       case '视频保存':
