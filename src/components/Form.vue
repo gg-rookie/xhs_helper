@@ -249,20 +249,20 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
                   const type = getMimeTypeFromUrl(url);
                   
                   // 方法1：直接使用URL（需要飞书能访问的公开URL）
-                  // return {
-                  //   url,
-                  //   name,
-                  //   type,
-                  //   size: 0 // 大小可选
-                  // };
+                  return {
+                    url,
+                    name,
+                    type,
+                    size: 0 // 大小可选
+                  };
                   
-                  const response = await fetch(url);
-                  const blob = await response.blob();
-                  return new File(
-                    [blob], 
-                    name, 
-                    { type }
-                  );
+                  // const response = await fetch(url);
+                  // const blob = await response.blob();
+                  // return new File(
+                  //   [blob], 
+                  //   name, 
+                  //   { type }
+                  // );
                 } catch (e) {
                   console.error(`处理图片URL失败: ${url}`, e);
                   return null;
