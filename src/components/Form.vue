@@ -169,7 +169,7 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
       case '文案':
         fieldMap[field.id] = xhsData.content
         break
-      case '点赞数':
+      case '喜欢数':
         fieldMap[field.id] = parseNumberWithUnits(xhsData.like_count)
         break
       case '评论数':
