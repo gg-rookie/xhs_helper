@@ -129,8 +129,6 @@ const formatXhsDataToFields = (xhsData, allFields) => {
   return fieldMap
 }
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms))
-
 const updateRecords = async () => {
   if (!formData.value.cookie) {
     updateProgress('请先输入小红书Cookie', 'exception')
@@ -178,7 +176,6 @@ const updateRecords = async () => {
     updateProgress(`开始处理 ${selectedRecords.length} 条记录...`)
 
     for (const fv of selectedRecords) {
-      await sleep(500)
       try {
         const recordId = fv.record_id
         const url = fv.value?.[0]?.text
@@ -216,6 +213,7 @@ const updateRecords = async () => {
         }
       } catch (err) {
         progress.value.failed++
+        console.log(err)
         updateProgress(`处理失败：${err.message}`, 'exception')
       } finally {
         progress.value.current++
