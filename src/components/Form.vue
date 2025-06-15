@@ -141,10 +141,7 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         // fieldMap[field.id] = tags;
         
         // 方法2：精确匹配选项ID（推荐）
-        // const validOptionIds = tags
-        //   .map(tag => options.find(opt => opt.name === tag)?.id)
-        //   .filter(Boolean);
-        // fieldMap[field.id] = validOptionIds;
+        
         
         // 方法3：自动添加不存在的选项
         const newTags = tags.filter(tag => 
@@ -155,13 +152,12 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
           await multiSelectField.addOptions(
             newTags.map(name => ({ name }))
           );
-          const updatedOptions = await multiSelectField.getOptions();
-          fieldMap[field.id] = tags.map(tag => 
-            updatedOptions.find(opt => opt.name === tag)?.id
-          ).filter(Boolean);
-        } else {
-          fieldMap[field.id] = tags;
-        }
+          
+        } 
+        const updatedOptions = await multiSelectField.getOptions();
+        fieldMap[field.id] = tags.map(tag => 
+          updatedOptions.find(opt => opt.name === tag)?.id
+        ).filter(Boolean);
         break;
       case '笔记图片':
         // 附件字段 - 转换为飞书附件格式
