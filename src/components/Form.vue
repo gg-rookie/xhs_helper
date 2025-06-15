@@ -159,9 +159,9 @@ const updateRecords = async () => {
     const table = await bitable.base.getTable(tableId)
     const allFields = await table.getFieldMetaList()
 
-    const linkFieldMeta = allFields.find(f => f.name === '笔记链接')
+    const linkFieldMeta = allFields.find(f => f.name === '链接')
     if (!linkFieldMeta) {
-      updateProgress('未找到“笔记链接”字段', 'exception')
+      updateProgress('未找到“链接”字段', 'exception')
       loading.value = false
       return
     }
