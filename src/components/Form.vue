@@ -131,36 +131,36 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         // 时间戳转 ISO 字符串或 Date 对象
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
-       case '笔记标签词':
-          const multiSelectField = await table.getField(field.id);
-          const options = await multiSelectField.getOptions();
-          const rawTags = xhsData.tag_list || [];
-          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
-          
-          // 方法1：自动匹配选项名称
-          fieldMap[field.id] = tags;
-          
-          // 方法2：精确匹配选项ID（推荐）
-          // const validOptionIds = tags
-          //   .map(tag => options.find(opt => opt.name === tag)?.id)
-          //   .filter(Boolean);
-          // fieldMap[field.id] = validOptionIds;
-          
-          // 方法3：自动添加不存在的选项
-          const newTags = tags.filter(tag => 
-            !options.some(opt => opt.name === tag)
+      case '笔记标签词':
+        const multiSelectField = await table.getField(field.id);
+        const options = await multiSelectField.getOptions();
+        const rawTags = xhsData.tag_list || [];
+        const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
+        
+        // 方法1：自动匹配选项名称
+        // fieldMap[field.id] = tags;
+        
+        // 方法2：精确匹配选项ID（推荐）
+        // const validOptionIds = tags
+        //   .map(tag => options.find(opt => opt.name === tag)?.id)
+        //   .filter(Boolean);
+        // fieldMap[field.id] = validOptionIds;
+        
+        // 方法3：自动添加不存在的选项
+        const newTags = tags.filter(tag => 
+          !options.some(opt => opt.name === tag)
+        );
+        if (newTags.length > 0) {
+          await multiSelectField.addOptions(
+            newTags.map(name => ({ name }))
           );
-          if (newTags.length > 0) {
-            await multiSelectField.addOptions(
-              newTags.map(name => ({ name }))
-            );
-            const updatedOptions = await multiSelectField.getOptions();
-            fieldMap[field.id] = tags.map(tag => 
-              updatedOptions.find(opt => opt.name === tag)?.id
-            ).filter(Boolean);
-          } else {
-            fieldMap[field.id] = tags;
-          }
+          const updatedOptions = await multiSelectField.getOptions();
+          fieldMap[field.id] = tags.map(tag => 
+            updatedOptions.find(opt => opt.name === tag)?.id
+          ).filter(Boolean);
+        } else {
+          fieldMap[field.id] = tags;
+        }
         break;
       case '笔记图片':
         // 附件字段 - 转换为飞书附件格式
