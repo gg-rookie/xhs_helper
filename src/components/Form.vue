@@ -99,7 +99,7 @@ function getMimeTypeFromUrl(url) {
   }
 }
 
-const formatXhsDataToFields = (xhsData, allFields) => {
+const formatXhsDataToFields = async (xhsData, allFields) => {
   const fieldMap = {}
   for (const field of allFields) {
     switch (field.name) {
@@ -132,10 +132,31 @@ const formatXhsDataToFields = (xhsData, allFields) => {
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
       case '笔记标签词':
-        fieldMap[field.id] = xhsData.tag_list || []
-        break
+        if (multiSelectField) {
+          const rawTags = xhsData.tag_list || [];
+          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
+          
+          // 找出不存在的标签
+          const newTags = tags.filter(tag => 
+            !tagOptions.some(opt => opt.name === tag)
+          );
+          
+          // 批量添加新选项
+          if (newTags.length > 0) {
+            await multiSelectField.addOptions(
+              newTags.map(name => ({ name }))
+            );
+            // 重新获取选项
+            tagOptions = await multiSelectField.getOptions();
+          }
+          
+          // 设置值
+          fieldMap[field.id] = tags.filter(tag => 
+            tagOptions.some(opt => opt.name === tag)
+          );
+        }
+        break;
       case '笔记图片':
-        case '笔记图片':
         // 附件字段 - 转换为飞书附件格式
         if (xhsData.images_link?.length > 0) {
           fieldMap[field.id] = xhsData.images_link.map(url => ({
@@ -221,13 +242,7 @@ const updateRecords = async () => {
           progress.value.failed++
           updateProgress(`记录 ${recordId} 失败：接口返回为空`)
         } else {
-          // const updateFields = {}
-          // for (const field of allFields) {
-          //   if (xhsData[field.name] !== undefined) {
-          //     updateFields[field.id] = xhsData[field.name]
-          //   }
-          // }
-          const updateFields = formatXhsDataToFields(xhsData, allFields)
+          const updateFields = await formatXhsDataToFields(xhsData, allFields)
 
           console.log(updateFields)
           if (Object.keys(updateFields).length > 0) {
