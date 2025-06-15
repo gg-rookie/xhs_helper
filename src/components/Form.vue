@@ -182,13 +182,42 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         }
         break;
       case '笔记图片':
-        // 附件字段 - 转换为飞书附件格式
         if (xhsData.images_link?.length > 0) {
-          fieldMap[field.id] = xhsData.images_link.map(url => ({
-            url: url,
-            name: url.split('/').pop() || 'image.jpg',
-            type: getMimeTypeFromUrl(url) // 需要实现这个函数
-          }));
+          try {            
+            const attachments = await Promise.all(
+              xhsData.images_link.slice(0, 10).map(async (url) => {
+                try {
+                  // 获取文件名和类型
+                  const name = url.split('/').pop() || `image_${Date.now()}.jpg`;
+                  const type = getMimeTypeFromUrl(url);
+                  
+                  // 方法1：直接使用URL（需要飞书能访问的公开URL）
+                  // return {
+                  //   url,
+                  //   name,
+                  //   type,
+                  //   size: 0 // 大小可选
+                  // };
+                  
+                  const response = await fetch(url);
+                  const blob = await response.blob();
+                  return new File(
+                    [blob], 
+                    name, 
+                    { type }
+                  );
+                } catch (e) {
+                  console.error(`处理图片URL失败: ${url}`, e);
+                  return null;
+                }
+              })
+            );
+            // 3. 过滤掉处理失败的URL
+            fieldMap[field.id] = attachments.filter(Boolean);
+          } catch (err) {
+            console.error('初始化附件字段失败:', err);
+            fieldMap[field.id] = [];
+          }
         } else {
           fieldMap[field.id] = [];
         }
