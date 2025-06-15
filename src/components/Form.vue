@@ -132,37 +132,35 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
        case '笔记标签词':
-        // 只有当字段是多选类型时才特殊处理
-        if (field.type === 'multi-select') {
-          try {
-            // 获取多选字段实例
-            const multiSelectField = await table.getField(field.id);
-            // 获取现有选项
-            const options = await multiSelectField.getOptions();
-            
-            // 处理标签数据
-            const rawTags = xhsData.tag_list || [];
-            const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
-            
-            // 方法1：简单设置（自动匹配名称）
+          const multiSelectField = await table.getField(field.id);
+          const options = await multiSelectField.getOptions();
+          const rawTags = xhsData.tag_list || [];
+          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
+          
+          // 方法1：自动匹配选项名称
+          fieldMap[field.id] = tags;
+          
+          // 方法2：精确匹配选项ID（推荐）
+          // const validOptionIds = tags
+          //   .map(tag => options.find(opt => opt.name === tag)?.id)
+          //   .filter(Boolean);
+          // fieldMap[field.id] = validOptionIds;
+          
+          // 方法3：自动添加不存在的选项
+          const newTags = tags.filter(tag => 
+            !options.some(opt => opt.name === tag)
+          );
+          if (newTags.length > 0) {
+            await multiSelectField.addOptions(
+              newTags.map(name => ({ name }))
+            );
+            const updatedOptions = await multiSelectField.getOptions();
+            fieldMap[field.id] = tags.map(tag => 
+              updatedOptions.find(opt => opt.name === tag)?.id
+            ).filter(Boolean);
+          } else {
             fieldMap[field.id] = tags;
-            
-            // 或者方法2：精确匹配选项ID（推荐）
-            // const validTags = tags
-            //   .map(tag => options.find(opt => opt.name === tag)?.id)
-            //   .filter(Boolean);
-            // fieldMap[field.id] = validTags;
-          } catch (err) {
-            console.error('处理多选字段时出错:', err);
-            // 出错时设置为空数组
-            fieldMap[field.id] = [];
           }
-        } else {
-          // 如果不是多选字段，按普通文本处理
-          fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
-            ? xhsData.tag_list.join(', ') 
-            : xhsData.tag_list || '';
-        }
         break;
       case '笔记图片':
         // 附件字段 - 转换为飞书附件格式
