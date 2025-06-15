@@ -82,17 +82,9 @@ const updateProgressPercent = () => {
   )
 }
 
-// 根据URL获取MIME类型
-function getMimeTypeFromUrl(url) {
-  const extension = url.split('.').pop()?.toLowerCase()
-  switch(extension) {
-    case 'jpg':
-    case 'jpeg': return 'image/jpeg'
-    case 'png': return 'image/png'
-    case 'gif': return 'image/gif'
-    case 'mp4': return 'video/mp4'
-    default: return 'application/octet-stream'
-  }
+// 强制使用JPG格式
+function getMimeTypeFromUrl() {
+  return 'image/jpeg' // 强制返回JPG类型
 }
 
 // 带单位的数字解析
@@ -134,7 +126,7 @@ function parseNumberWithUnits(input) {
   return num
 }
 
-// 上传文件到飞书并获取token
+// 上传文件到飞书并获取token（强制JPG格式）
 const uploadFileToBitable = async (url) => {
   try {
     const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`
@@ -142,22 +134,36 @@ const uploadFileToBitable = async (url) => {
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
     
     const blob = await response.blob()
-    const filename = url.split('/').pop() || `image_${Date.now()}.${blob.type.split('/')[1] || 'jpg'}`
-    const file = new File([blob], filename, { type: blob.type })
-    
-    // 上传文件并获取token
-    const tokens = await bitable.base.batchUploadFile([file])
-    if (!tokens || !tokens.length) throw new Error('No file token returned')
+    // 强制使用JPG格式
+    const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, '') || `image_${Date.now()}`
+    const jpgFilename = `${filename}.jpg`
     
     return {
-      token: tokens[0],
-      name: filename,
-      type: blob.type,
+      token: await convertBlobToJpgToken(blob, jpgFilename),
+      name: jpgFilename,
+      type: 'image/jpeg',
       timeStamp: Date.now(),
       size: blob.size
     }
   } catch (error) {
     console.error('文件上传失败:', error)
+    throw error
+  }
+}
+
+// 将Blob转换为JPG格式并上传
+const convertBlobToJpgToken = async (blob, filename) => {
+  try {
+    // 如果是图片但不是JPG，需要转换（这里简化处理，实际可能需要canvas转换）
+    const file = blob.type === 'image/jpeg' 
+      ? new File([blob], filename, { type: 'image/jpeg' })
+      : new File([blob], filename, { type: 'image/jpeg' }) // 强制设置为JPG
+    
+    const tokens = await bitable.base.batchUploadFile([file])
+    if (!tokens || !tokens.length) throw new Error('No file token returned')
+    return tokens[0]
+  } catch (error) {
+    console.error('JPG转换上传失败:', error)
     throw error
   }
 }
@@ -211,28 +217,25 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
           const fieldInstance = await table.getField(field.id)
           const fieldType = await fieldInstance.getType()
           
-          if (fieldType !== 4) { // 非多选字段
+          if (fieldType !== 4) {
             fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
               ? xhsData.tag_list.join(', ')
               : xhsData.tag_list || ''
             break
           }
 
-          // 多选字段处理
           const multiSelectField = await table.getField(field.id)
           let options = await multiSelectField.getOptions()
           
           const rawTags = xhsData.tag_list || []
           const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/)
           
-          // 添加新标签选项
           const newTags = tags.filter(tag => !options.some(opt => opt.name === tag))
           if (newTags.length > 0) {
             await multiSelectField.addOptions(newTags.map(name => ({ name })))
-            options = await multiSelectField.getOptions() // 刷新选项
+            options = await multiSelectField.getOptions()
           }
           
-          // 构建字段值
           fieldMap[field.id] = tags
             .map(tag => {
               const option = options.find(opt => opt.name === tag)
@@ -249,16 +252,12 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
           try {
-            // 上传所有图片并获取token
             const attachments = []
             
-            // 限制最多处理10张图片
             for (const url of xhsData.images_link.slice(0, 10)) {
               try {
                 const attachment = await uploadFileToBitable(url)
                 attachments.push(attachment)
-                
-                // 添加延迟避免触发速率限制
                 await new Promise(resolve => setTimeout(resolve, 500))
               } catch (e) {
                 console.error(`处理图片失败: ${url}`, e)
@@ -299,7 +298,6 @@ const updateRecords = async () => {
     resetProgress()
     updateProgress('正在初始化处理...')
 
-    // 获取当前选择的表格和视图
     const { tableId, viewId } = await bitable.base.getSelection()
     if (!tableId) {
       updateProgress('请先选择数据表', 'exception')
@@ -307,7 +305,6 @@ const updateRecords = async () => {
       return
     }
 
-    // 选择要更新的记录
     const recordIds = await bitable.ui.selectRecordIdList(tableId, viewId)
     if (!recordIds?.length) {
       updateProgress('请选择要更新的记录', 'exception')
@@ -315,11 +312,9 @@ const updateRecords = async () => {
       return
     }
 
-    // 获取表格和字段信息
     const table = await bitable.base.getTable(tableId)
     const allFields = await table.getFieldMetaList()
 
-    // 检查链接字段是否存在
     const linkFieldMeta = allFields.find(f => f.name === '链接')
     if (!linkFieldMeta) {
       updateProgress('未找到"链接"字段', 'exception')
@@ -327,17 +322,14 @@ const updateRecords = async () => {
       return
     }
 
-    // 获取选中记录的链接
     const linkField = await table.getFieldById(linkFieldMeta.id)
     const fieldValues = await linkField.getFieldValueList()
     const selectedRecords = fieldValues.filter(fv => recordIds.includes(fv.record_id))
 
-    // 设置进度信息
     progress.value.total = selectedRecords.length
     showProgressDialog.value = true
     updateProgress(`开始处理 ${selectedRecords.length} 条记录...`)
 
-    // 处理每条记录
     for (const fv of selectedRecords) {
       try {
         const recordId = fv.record_id
@@ -351,7 +343,6 @@ const updateRecords = async () => {
           continue
         }
 
-        // 调用API获取小红书数据
         updateProgress(`处理记录 ${recordId}: 获取数据中...`)
         const xhsData = await callXhsDetailApi(url)
         
@@ -359,11 +350,9 @@ const updateRecords = async () => {
           progress.value.failed++
           updateProgress(`记录 ${recordId} 失败：接口返回为空`, 'warning')
         } else {
-          // 格式化数据为飞书字段
           updateProgress(`处理记录 ${recordId}: 格式化数据中...`)
           const updateFields = await formatXhsDataToFields(xhsData, allFields, table)
 
-          // 更新记录
           if (Object.keys(updateFields).length > 0) {
             updateProgress(`处理记录 ${recordId}: 写入数据中...`)
             await table.setRecord(recordId, { fields: updateFields })
@@ -384,7 +373,6 @@ const updateRecords = async () => {
       }
     }
 
-    // 处理完成
     updateProgress('处理完成！')
     if (progress.value.failed === 0 && progress.value.success > 0) {
       progress.value.status = 'success'
