@@ -14,15 +14,12 @@ import {
 } from 'element-plus'
 import { CircleCheck, Close } from '@element-plus/icons-vue'
 
-// 这里根据你的表结构替换成实际fieldId
-const fieldId = 'yourFieldId'
-
 const formData = ref({ cookie: '' })
 const loading = ref(false)
 const showProgressDialog = ref(false)
 const progress = ref({
   percent: 0,
-  status: 'success', // success, warning, exception
+  status: 'success',
   current: 0,
   total: 0,
   success: 0,
@@ -31,6 +28,7 @@ const progress = ref({
   message: '准备开始处理...',
 })
 
+// 调用小红书详情API
 const callXhsDetailApi = async (url) => {
   try {
     const response = await fetch('https://nibelungen.site/xhs/xhs_detail', {
@@ -51,6 +49,7 @@ const callXhsDetailApi = async (url) => {
   }
 }
 
+// 重置进度
 const resetProgress = () => {
   progress.value = {
     percent: 0,
@@ -64,11 +63,13 @@ const resetProgress = () => {
   }
 }
 
+// 更新进度信息
 const updateProgress = (message, status = null) => {
   progress.value.message = message
   if (status) progress.value.status = status
 }
 
+// 更新进度百分比
 const updateProgressPercent = () => {
   progress.value.percent = Math.min(
     100,
@@ -81,209 +82,212 @@ const updateProgressPercent = () => {
   )
 }
 
-// 根据URL后缀获取MIME类型
+// 根据URL获取MIME类型
 function getMimeTypeFromUrl(url) {
-  const extension = url.split('.').pop()?.toLowerCase();
+  const extension = url.split('.').pop()?.toLowerCase()
   switch(extension) {
     case 'jpg':
-    case 'jpeg':
-      return 'image/jpeg';
-    case 'png':
-      return 'image/png';
-    case 'gif':
-      return 'image/gif';
-    case 'mp4':
-      return 'video/mp4';
-    default:
-      return 'application/octet-stream';
+    case 'jpeg': return 'image/jpeg'
+    case 'png': return 'image/png'
+    case 'gif': return 'image/gif'
+    case 'mp4': return 'video/mp4'
+    default: return 'application/octet-stream'
   }
 }
 
-
+// 带单位的数字解析
 function parseNumberWithUnits(input) {
-  // 处理null/undefined/空字符串
-  if (input == null || input === '') return 0;
+  if (input == null || input === '') return 0
+  if (typeof input === 'number') return input
   
-  // 如果是数字直接返回
-  if (typeof input === 'number') return input;
-  
-  // 统一转为字符串处理
-  const str = String(input).trim();
-  
-  // 匹配纯数字（含千分位逗号）
+  const str = String(input).trim()
   if (/^[\d,]+$/.test(str)) {
-    return parseInt(str.replace(/,/g, ''), 10);
+    return parseInt(str.replace(/,/g, ''), 10)
   }
   
-  // 定义单位映射表（新增k/w支持）
   const unitMap = {
-    '十': 10,
-    '百': 100,
+    '十': 10, '百': 100,
     '千': 1000, 'k': 1000, 'K': 1000,
     '万': 10000, 'w': 10000, 'W': 10000,
     '亿': 100000000,
     'm': 1000000, 'M': 1000000,
     'b': 1000000000, 'B': 1000000000
-  };
-  
-  // 正则匹配：数字部分+单位部分
-  const match = str.match(/^([\d.,]+)\s*([^\d.]*)$/);
-  if (!match) return 0;
-  
-  const numPart = match[1].replace(/,/g, '');
-  const unitPart = match[2].toLowerCase(); // 统一转为小写处理
-  
-  // 解析基础数字
-  const num = parseFloat(numPart);
-  if (isNaN(num)) return 0;
-  
-  // 处理无单位情况
-  if (!unitPart) return num;
-  
-  // 特殊处理"万"和"w"的组合（如1.2w=12000）
-  if (unitPart.includes('万') || unitPart.includes('w')) {
-    return num * 10000;
   }
   
-  // 查找单位对应的倍数
+  const match = str.match(/^([\d.,]+)\s*([^\d.]*)$/)
+  if (!match) return 0
+  
+  const numPart = match[1].replace(/,/g, '')
+  const unitPart = match[2].toLowerCase()
+  const num = parseFloat(numPart)
+  if (isNaN(num)) return 0
+  
+  if (!unitPart) return num
+  if (unitPart.includes('万') || unitPart.includes('w')) return num * 10000
+  
   for (const unit in unitMap) {
     if (unitPart.includes(unit.toLowerCase())) {
-      return num * unitMap[unit];
+      return num * unitMap[unit]
     }
   }
   
-  // 默认返回原数字（未知单位）
-  return num;
+  return num
 }
 
+// 上传文件到飞书并获取token
+const uploadFileToBitable = async (url) => {
+  try {
+    const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`
+    const response = await fetch(proxyUrl)
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
+    
+    const blob = await response.blob()
+    const filename = url.split('/').pop() || `image_${Date.now()}.${blob.type.split('/')[1] || 'jpg'}`
+    const file = new File([blob], filename, { type: blob.type })
+    
+    // 上传文件并获取token
+    const tokens = await bitable.base.batchUploadFile([file])
+    if (!tokens || !tokens.length) throw new Error('No file token returned')
+    
+    return {
+      token: tokens[0],
+      name: filename,
+      type: blob.type,
+      timeStamp: Date.now(),
+      size: blob.size
+    }
+  } catch (error) {
+    console.error('文件上传失败:', error)
+    throw error
+  }
+}
+
+// 格式化小红书数据为飞书字段
 const formatXhsDataToFields = async (xhsData, allFields, table) => {
   const fieldMap = {}
+  
   for (const field of allFields) {
-    switch (field.name) {
+    const fieldName = field.name.trim()
+    
+    switch (fieldName) {
       case '博主':
         fieldMap[field.id] = xhsData.author
         break
+        
       case '标题':
         fieldMap[field.id] = xhsData.title
         break
+        
       case '文案':
         fieldMap[field.id] = xhsData.content
         break
+        
       case '喜欢数':
         fieldMap[field.id] = parseNumberWithUnits(xhsData.like_count)
         break
+        
       case '评论数':
         fieldMap[field.id] = parseNumberWithUnits(xhsData.comment_count)
         break
+        
       case '收藏数':
         fieldMap[field.id] = parseNumberWithUnits(xhsData.collected_count)
         break
+        
       case '分享数':
         fieldMap[field.id] = parseNumberWithUnits(xhsData.share_count)
         break
+        
       case '发布地点':
         fieldMap[field.id] = xhsData.location
         break
+        
       case '笔记发布时间':
-        // 时间戳转 ISO 字符串或 Date 对象
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
+        
       case '笔记标签词':
         try {
-          // 1. 获取字段实例并验证类型
-          const fieldInstance = await table.getField(field.id);
-          const fieldType = await fieldInstance.getType();
-          console.log(fieldType);
+          const fieldInstance = await table.getField(field.id)
+          const fieldType = await fieldInstance.getType()
           
-          
-          if (fieldType !== 4) {
-            // 如果不是多选字段，按文本处理
+          if (fieldType !== 4) { // 非多选字段
             fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
               ? xhsData.tag_list.join(', ')
-              : xhsData.tag_list || '';
-            break;
+              : xhsData.tag_list || ''
+            break
           }
 
-          // 2. 作为多选字段处理
-          const multiSelectField = await table.getField(field.id);
-          const options = await multiSelectField.getOptions();
+          // 多选字段处理
+          const multiSelectField = await table.getField(field.id)
+          let options = await multiSelectField.getOptions()
           
-          // 3. 处理标签数据
-          const rawTags = xhsData.tag_list || [];
-          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
+          const rawTags = xhsData.tag_list || []
+          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/)
           
-          // 4. 找出不存在的标签并添加
-          const newTags = tags.filter(tag => 
-            !options.some(opt => opt.name === tag)
-          );
-          
+          // 添加新标签选项
+          const newTags = tags.filter(tag => !options.some(opt => opt.name === tag))
           if (newTags.length > 0) {
-            await multiSelectField.addOptions(
-              newTags.map(name => ({ name }))
-            );
-            // 重新获取选项以包含新增的
-            options = await multiSelectField.getOptions();
+            await multiSelectField.addOptions(newTags.map(name => ({ name })))
+            options = await multiSelectField.getOptions() // 刷新选项
           }
           
-          // 5. 构建符合API要求的格式
+          // 构建字段值
           fieldMap[field.id] = tags
             .map(tag => {
-              const option = options.find(opt => opt.name === tag);
-              return option ? { id: option.id, text: option.name } : null;
+              const option = options.find(opt => opt.name === tag)
+              return option ? { id: option.id, text: option.name } : null
             })
-            .filter(Boolean);
+            .filter(Boolean)
             
         } catch (err) {
-          console.error(`处理[笔记标签词]字段出错:`, err);
-          fieldMap[field.id] = []; // 出错时设为空数组
+          console.error(`处理[笔记标签词]字段出错:`, err)
+          fieldMap[field.id] = []
         }
-        break;
+        break
+        
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
-          try {            
-            const attachments = await Promise.all(
-              xhsData.images_link.map(async (url) => {
-                try {
-                  // 获取文件名和类型
-                  const name = url.split('/').pop() || `image_${Date.now()}.jpg`;
-                  const type = getMimeTypeFromUrl(url);
-                  
-                  // 使用代理服务器获取图片
-                  const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`;
-
-                  const response = await fetch(proxyUrl);
-                  if (!response.ok) throw new Error('Failed to fetch image');
-                  const blob = await response.blob();
-                  return new File(
-                    [blob], 
-                    name, 
-                    { type }
-                  );
-                } catch (e) {
-                  console.error(`处理图片URL失败: ${url}`, e);
-                  return null;
-                }
-              })
-            );
-            fieldMap[field.id] = attachments.filter(Boolean);
+          try {
+            // 上传所有图片并获取token
+            const attachments = []
+            
+            // 限制最多处理10张图片
+            for (const url of xhsData.images_link.slice(0, 10)) {
+              try {
+                const attachment = await uploadFileToBitable(url)
+                attachments.push(attachment)
+                
+                // 添加延迟避免触发速率限制
+                await new Promise(resolve => setTimeout(resolve, 500))
+              } catch (e) {
+                console.error(`处理图片失败: ${url}`, e)
+              }
+            }
+            
+            fieldMap[field.id] = attachments
           } catch (err) {
-            console.error('初始化附件字段失败:', err);
-            fieldMap[field.id] = [];
+            console.error('处理附件字段失败:', err)
+            fieldMap[field.id] = []
           }
         } else {
-          fieldMap[field.id] = [];
+          fieldMap[field.id] = []
         }
-        break;
+        break
+        
       case '视频保存':
         fieldMap[field.id] = xhsData.video_url ?? ''
         break
+        
       default:
         break
     }
   }
+  
   return fieldMap
 }
 
+// 更新记录
 const updateRecords = async () => {
   if (!formData.value.cookie) {
     updateProgress('请先输入小红书Cookie', 'exception')
@@ -295,6 +299,7 @@ const updateRecords = async () => {
     resetProgress()
     updateProgress('正在初始化处理...')
 
+    // 获取当前选择的表格和视图
     const { tableId, viewId } = await bitable.base.getSelection()
     if (!tableId) {
       updateProgress('请先选择数据表', 'exception')
@@ -302,6 +307,7 @@ const updateRecords = async () => {
       return
     }
 
+    // 选择要更新的记录
     const recordIds = await bitable.ui.selectRecordIdList(tableId, viewId)
     if (!recordIds?.length) {
       updateProgress('请选择要更新的记录', 'exception')
@@ -309,27 +315,29 @@ const updateRecords = async () => {
       return
     }
 
+    // 获取表格和字段信息
     const table = await bitable.base.getTable(tableId)
     const allFields = await table.getFieldMetaList()
 
+    // 检查链接字段是否存在
     const linkFieldMeta = allFields.find(f => f.name === '链接')
     if (!linkFieldMeta) {
-      updateProgress('未找到“链接”字段', 'exception')
+      updateProgress('未找到"链接"字段', 'exception')
       loading.value = false
       return
     }
 
+    // 获取选中记录的链接
     const linkField = await table.getFieldById(linkFieldMeta.id)
     const fieldValues = await linkField.getFieldValueList()
-
-    // 只保留选中的记录的链接
     const selectedRecords = fieldValues.filter(fv => recordIds.includes(fv.record_id))
-    console.log(selectedRecords);
 
+    // 设置进度信息
     progress.value.total = selectedRecords.length
     showProgressDialog.value = true
     updateProgress(`开始处理 ${selectedRecords.length} 条记录...`)
 
+    // 处理每条记录
     for (const fv of selectedRecords) {
       try {
         const recordId = fv.record_id
@@ -343,15 +351,21 @@ const updateRecords = async () => {
           continue
         }
 
+        // 调用API获取小红书数据
+        updateProgress(`处理记录 ${recordId}: 获取数据中...`)
         const xhsData = await callXhsDetailApi(url)
+        
         if (!xhsData) {
           progress.value.failed++
-          updateProgress(`记录 ${recordId} 失败：接口返回为空`)
+          updateProgress(`记录 ${recordId} 失败：接口返回为空`, 'warning')
         } else {
-          const updateFields = await formatXhsDataToFields(xhsData, allFields,table)
+          // 格式化数据为飞书字段
+          updateProgress(`处理记录 ${recordId}: 格式化数据中...`)
+          const updateFields = await formatXhsDataToFields(xhsData, allFields, table)
 
-          console.log(updateFields)
+          // 更新记录
           if (Object.keys(updateFields).length > 0) {
+            updateProgress(`处理记录 ${recordId}: 写入数据中...`)
             await table.setRecord(recordId, { fields: updateFields })
             progress.value.success++
             updateProgress(`记录 ${recordId} 更新成功`)
@@ -362,7 +376,7 @@ const updateRecords = async () => {
         }
       } catch (err) {
         progress.value.failed++
-        console.log(err)
+        console.error(`记录处理失败:`, err)
         updateProgress(`处理失败：${err.message}`, 'exception')
       } finally {
         progress.value.current++
@@ -370,6 +384,7 @@ const updateRecords = async () => {
       }
     }
 
+    // 处理完成
     updateProgress('处理完成！')
     if (progress.value.failed === 0 && progress.value.success > 0) {
       progress.value.status = 'success'
@@ -385,8 +400,6 @@ const updateRecords = async () => {
     loading.value = false
   }
 }
-
-
 
 onMounted(() => {
   document.title = '小红书助手 - 详情批量更新'
@@ -434,7 +447,7 @@ onMounted(() => {
     <el-dialog
       v-model="showProgressDialog"
       title="处理进度"
-      width="320px"
+      width="400px"
       :close-on-click-modal="false"
       :close-on-press-escape="false"
       :show-close="false"
@@ -497,59 +510,59 @@ h1 {
   padding: 15px 20px;
   background-color: #f8f8f8;
   border-radius: 4px;
-  max-width: 100%;       /* 限制宽度不要超过弹窗 */
+  max-width: 100%;
   box-sizing: border-box;
-  word-break: break-word; /* 防止长文本溢出 */
+  word-break: break-word;
 }
 
 .progress-message {
   font-size: 14px;
   margin-bottom: 10px;
   color: #333;
-  white-space: normal;    /* 允许换行 */
+  white-space: normal;
 }
 
 .progress-stats {
   font-size: 14px;
   display: flex;
   justify-content: space-between;
-  flex-wrap: wrap;        /* 小屏幕换行 */
-  gap: 10px;              /* 各项间距 */
+  flex-wrap: wrap;
+  gap: 10px;
 }
 
 .progress-stats > div:first-child {
-  flex: 1 1 100%;        /* 进度信息独占一行 */
+  flex: 1 1 100%;
   margin-bottom: 8px;
 }
 
 .stats-row {
   display: flex;
   gap: 15px;
-  flex-wrap: wrap;       /* 小屏幕下换行 */
+  flex-wrap: wrap;
   flex: 1 1 auto;
 }
 
 .stats-row span {
-  white-space: nowrap;   /* 成功、失败、跳过统计项不换行 */
+  white-space: nowrap;
 }
 
-/* 颜色保持你之前的设置 */
 .success {
-  color: #67c23a; /* 绿色 */
+  color: #67c23a;
 }
 
 .failed {
-  color: #f56c6c; /* 红色 */
+  color: #f56c6c;
 }
 
 .skipped {
-  color: #e6a23c; /* 橙色，警告色 */
+  color: #e6a23c;
 }
+
 ::v-deep(.el-dialog__body) {
   display: flex;
   flex-direction: column;
-  align-items: center;       /* 水平居中 */
-  justify-content: center;   /* 垂直居中 */
+  align-items: center;
+  justify-content: center;
   padding: 20px 0;
 }
 
@@ -562,5 +575,4 @@ h1 {
   max-width: 320px;
   text-align: center;
 }
-
 </style>
