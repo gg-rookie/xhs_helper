@@ -132,32 +132,54 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
       case '笔记标签词':
-        const multiSelectField = await table.getField(field.id);
-        const options = await multiSelectField.getOptions();
-        const rawTags = xhsData.tag_list || [];
-        const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
-        
-        // 方法1：自动匹配选项名称
-        // fieldMap[field.id] = tags;
-        
-        // 方法2：精确匹配选项ID（推荐）
-        
-        
-        // 方法3：自动添加不存在的选项
-        const newTags = tags.filter(tag => 
-          !options.some(opt => opt.name === tag)
-        );
-        if (newTags.length > 0) {
-          console.log('大于0')
-          await multiSelectField.addOptions(
-            newTags.map(name => ({ name }))
+        try {
+          // 1. 获取字段实例并验证类型
+          const fieldInstance = await table.getField(field.id);
+          const fieldType = await fieldInstance.getType();
+          console.log(fieldType);
+          
+          
+          if (fieldType !== 'multi-select') {
+            // 如果不是多选字段，按文本处理
+            fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
+              ? xhsData.tag_list.join(', ')
+              : xhsData.tag_list || '';
+            break;
+          }
+
+          // 2. 作为多选字段处理
+          const multiSelectField = await table.getField(field.id);
+          const options = await multiSelectField.getOptions();
+          
+          // 3. 处理标签数据
+          const rawTags = xhsData.tag_list || [];
+          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/);
+          
+          // 4. 找出不存在的标签并添加
+          const newTags = tags.filter(tag => 
+            !options.some(opt => opt.name === tag)
           );
           
-        } 
-        const updatedOptions = await multiSelectField.getOptions();
-        fieldMap[field.id] = tags.map(tag => 
-          updatedOptions.find(opt => opt.name === tag)?.id
-        ).filter(Boolean);
+          if (newTags.length > 0) {
+            await multiSelectField.addOptions(
+              newTags.map(name => ({ name }))
+            );
+            // 重新获取选项以包含新增的
+            options = await multiSelectField.getOptions();
+          }
+          
+          // 5. 构建符合API要求的格式
+          fieldMap[field.id] = tags
+            .map(tag => {
+              const option = options.find(opt => opt.name === tag);
+              return option ? { id: option.id, text: option.name } : null;
+            })
+            .filter(Boolean);
+            
+        } catch (err) {
+          console.error(`处理[笔记标签词]字段出错:`, err);
+          fieldMap[field.id] = []; // 出错时设为空数组
+        }
         break;
       case '笔记图片':
         // 附件字段 - 转换为飞书附件格式
