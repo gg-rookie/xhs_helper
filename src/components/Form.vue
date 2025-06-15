@@ -151,6 +151,7 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
           !options.some(opt => opt.name === tag)
         );
         if (newTags.length > 0) {
+          console.log('大于0')
           await multiSelectField.addOptions(
             newTags.map(name => ({ name }))
           );
