@@ -99,6 +99,63 @@ function getMimeTypeFromUrl(url) {
   }
 }
 
+
+function parseNumberWithUnits(input) {
+  // 处理null/undefined/空字符串
+  if (input == null || input === '') return 0;
+  
+  // 如果是数字直接返回
+  if (typeof input === 'number') return input;
+  
+  // 统一转为字符串处理
+  const str = String(input).trim();
+  
+  // 匹配纯数字（含千分位逗号）
+  if (/^[\d,]+$/.test(str)) {
+    return parseInt(str.replace(/,/g, ''), 10);
+  }
+  
+  // 定义单位映射表（新增k/w支持）
+  const unitMap = {
+    '十': 10,
+    '百': 100,
+    '千': 1000, 'k': 1000, 'K': 1000,
+    '万': 10000, 'w': 10000, 'W': 10000,
+    '亿': 100000000,
+    'm': 1000000, 'M': 1000000,
+    'b': 1000000000, 'B': 1000000000
+  };
+  
+  // 正则匹配：数字部分+单位部分
+  const match = str.match(/^([\d.,]+)\s*([^\d.]*)$/);
+  if (!match) return 0;
+  
+  const numPart = match[1].replace(/,/g, '');
+  const unitPart = match[2].toLowerCase(); // 统一转为小写处理
+  
+  // 解析基础数字
+  const num = parseFloat(numPart);
+  if (isNaN(num)) return 0;
+  
+  // 处理无单位情况
+  if (!unitPart) return num;
+  
+  // 特殊处理"万"和"w"的组合（如1.2w=12000）
+  if (unitPart.includes('万') || unitPart.includes('w')) {
+    return num * 10000;
+  }
+  
+  // 查找单位对应的倍数
+  for (const unit in unitMap) {
+    if (unitPart.includes(unit.toLowerCase())) {
+      return num * unitMap[unit];
+    }
+  }
+  
+  // 默认返回原数字（未知单位）
+  return num;
+}
+
 const formatXhsDataToFields = async (xhsData, allFields, table) => {
   const fieldMap = {}
   for (const field of allFields) {
@@ -113,16 +170,16 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         fieldMap[field.id] = xhsData.content
         break
       case '点赞数':
-        fieldMap[field.id] = xhsData.like_count
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.like_count)
         break
       case '评论数':
-        fieldMap[field.id] = xhsData.comment_count
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.comment_count)
         break
       case '收藏数':
-        fieldMap[field.id] = xhsData.collected_count
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.collected_count)
         break
       case '分享数':
-        fieldMap[field.id] = xhsData.share_count
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.share_count)
         break
       case '发布地点':
         fieldMap[field.id] = xhsData.location
