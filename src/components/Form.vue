@@ -201,7 +201,7 @@ const updateRecords = async () => {
           // }
           const updateFields = formatXhsDataToFields(xhsData, allFields)
 
-
+          console.log(updateFields)
           if (Object.keys(updateFields).length > 0) {
             await table.setRecord(recordId, { fields: updateFields })
             progress.value.success++
