@@ -139,7 +139,7 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
           console.log(fieldType);
           
           
-          if (fieldType !== 'multi-select') {
+          if (fieldType !== 4) {
             // 如果不是多选字段，按文本处理
             fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
               ? xhsData.tag_list.join(', ')
