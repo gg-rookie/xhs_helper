@@ -88,38 +88,38 @@ const formatXhsDataToFields = (xhsData, allFields) => {
       case '博主':
         fieldMap[field.id] = xhsData.author
         break
-      case '笔记标题':
+      case '标题':
         fieldMap[field.id] = xhsData.title
         break
-      case '笔记内容':
+      case '文案':
         fieldMap[field.id] = xhsData.content
         break
-      case '点赞量':
+      case '点赞数':
         fieldMap[field.id] = xhsData.like_count
         break
-      case '评论量':
+      case '评论数':
         fieldMap[field.id] = xhsData.comment_count
         break
-      case '收藏量':
+      case '收藏数':
         fieldMap[field.id] = xhsData.collected_count
         break
-      case '转发量':
+      case '分享数':
         fieldMap[field.id] = xhsData.share_count
         break
-      case '位置':
+      case '发布地点':
         fieldMap[field.id] = xhsData.location
         break
       case '笔记发布时间':
         // 时间戳转 ISO 字符串或 Date 对象
         fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         break
-      case '笔记话题':
+      case '笔记标签词':
         fieldMap[field.id] = xhsData.tag_list?.join(', ') ?? ''
         break
-      case '图片链接':
+      case '笔记图片':
         fieldMap[field.id] = xhsData.images_link?.slice(0, 3).join(', ') ?? ''
         break
-      case '视频链接':
+      case '视频保存':
         fieldMap[field.id] = xhsData.video_url ?? ''
         break
       default:
