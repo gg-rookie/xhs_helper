@@ -120,77 +120,107 @@ const fetchAuthorNotes = async () => {
 }
 
 // 将作者笔记导入到表格
+// 导入作者笔记到表格
+// 导入作者笔记到表格
 const importAuthorNotesToTable = async () => {
   if (!authorNotes.value.length) {
-    updateProgress('没有可导入的笔记数据', 'warning')
-    return
+    updateProgress('没有可导入的笔记数据', 'warning');
+    return;
   }
 
   try {
-    loading.value = true
-    resetProgress()
-    updateProgress('准备导入笔记数据...')
+    loading.value = true;
+    resetProgress();
+    updateProgress('准备导入笔记数据...');
     
-    const { tableId, viewId } = await bitable.base.getSelection()
+    const { tableId, viewId } = await bitable.base.getSelection();
     if (!tableId) {
-      updateProgress('请先选择数据表', 'exception')
-      loading.value = false
-      return
+      updateProgress('请先选择数据表', 'exception');
+      loading.value = false;
+      return;
     }
 
-    const table = await bitable.base.getTable(tableId)
-    const allFields = await table.getFieldMetaList()
+    const table = await bitable.base.getTable(tableId);
+    const allFields = await table.getFieldMetaList();
 
-    // 查找链接字段
-    const linkField = allFields.find(f => f.name === '链接')
+    // 1. 确保链接字段存在
+    let linkField = allFields.find(f => f.name === '链接');
     if (!linkField) {
-      updateProgress('未找到"链接"字段，请确保表格中有链接字段', 'exception')
-      loading.value = false
-      return
+      updateProgress('正在创建链接字段...');
+      linkField = await table.addField({
+        type: FieldType.Url,
+        name: '链接'
+      });
     }
 
-    progress.value.total = authorNotes.value.length
-    showProgressDialog.value = true
-    updateProgress(`开始导入 ${authorNotes.value.length} 条笔记...`)
+    // 2. 准备批量添加的数据
+    progress.value.total = authorNotes.value.length;
+    showProgressDialog.value = true;
+    updateProgress(`开始导入 ${authorNotes.value.length} 条笔记...`);
 
-    // 批量添加记录
-    const batchSize = 10  // 每次批量处理10条
+    // 3. 分批处理（每次处理10条）
+    const batchSize = 10;
     for (let i = 0; i < authorNotes.value.length; i += batchSize) {
-      const batchNotes = authorNotes.value.slice(i, i + batchSize)
+      const batchNotes = authorNotes.value.slice(i, i + batchSize);
       
-      // 准备批量添加的数据
-      const records = batchNotes.map(note => {
+      const records = batchNotes.map(noteUrl => {
+        // 构造URL字段数据（多维表格特殊格式）
+        const urlFieldValue = {
+          text: '小红书笔记',
+          link: noteUrl,
+          type: 'url'
+        };
+        
         return {
           fields: {
-            [linkField.id]: [{ text: note.url, type: 'url' }],
-            // 可以添加其他字段的初始值
+            [linkField.id]: [urlFieldValue]
           }
-        }
-      })
+        };
+      });
 
       try {
-        updateProgress(`正在导入第 ${i + 1}-${i + batchNotes.length} 条笔记...`)
-        await table.addRecords(records)
-        progress.value.success += batchNotes.length
+        updateProgress(`正在导入第 ${i + 1}-${i + batchNotes.length} 条笔记...`);
+        await table.addRecords(records);
+        progress.value.success += batchNotes.length;
       } catch (err) {
-        console.error('批量导入失败:', err)
-        progress.value.failed += batchNotes.length
-        updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
+        console.error('批量导入失败:', err);
+        progress.value.failed += batchNotes.length;
+        updateProgress(`部分笔记导入失败: ${err.message}`, 'warning');
+        
+        // 失败后尝试单条导入
+        for (const noteUrl of batchNotes) {
+          try {
+            await table.addRecord({
+              fields: {
+                [linkField.id]: [{
+                  text: '小红书笔记',
+                  link: noteUrl
+                }]
+              }
+            });
+            progress.value.success++;
+          } catch (e) {
+            progress.value.failed++;
+            console.error('单条导入失败:', noteUrl, e);
+          }
+          progress.value.current++;
+          updateProgressPercent();
+        }
       } finally {
-        progress.value.current += batchNotes.length
-        updateProgressPercent()
+        progress.value.current += batchNotes.length;
+        updateProgressPercent();
       }
     }
 
-    updateProgress('笔记导入完成!', progress.value.failed > 0 ? 'warning' : 'success')
+    updateProgress('笔记导入完成!', progress.value.failed > 0 ? 'warning' : 'success');
   } catch (err) {
-    console.error('导入笔记出错:', err)
-    updateProgress(`导入失败: ${err.message}`, 'exception')
+    console.error('导入笔记出错:', err);
+    updateProgress(`导入失败: ${err.message}`, 'exception');
   } finally {
-    loading.value = false
-    showAuthorNotesDialog.value = false
+    loading.value = false;
+    showAuthorNotesDialog.value = false;
   }
-}
+};
 
 // 重置进度
 const resetProgress = () => {
@@ -272,8 +302,16 @@ function parseNumberWithUnits(input) {
 // 上传文件到飞书并获取token（强制JPG格式）
 const uploadFileToBitable = async (url) => {
   try {
-    const proxyUrl = `https://nibelungen.site/xhs/proxy-image?url=${encodeURIComponent(url)}`
-    const response = await fetch(proxyUrl)
+    const response = await fetch('https://nibelungen.site/xhs/proxy-image', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json'  // 必须设置
+      },
+      body: JSON.stringify({
+        url: encodeURIComponent(url)  // 发送 JSON 数据
+      })
+    })
+    
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
     
     const blob = await response.blob()
@@ -317,8 +355,38 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
     const fieldName = field.name.trim()
     
     switch (fieldName) {
-      case '博主':
-        fieldMap[field.id] = xhsData.author
+       case '博主':  // 处理单选字段
+        try {
+          const fieldInstance = await table.getField(field.id)
+          const fieldType = await fieldInstance.getType()
+          
+          if (fieldType !== 3) {  // 如果不是单选字段，直接赋值文本
+            fieldMap[field.id] = xhsData.author
+            break
+          }
+
+          // 获取单选字段的选项
+          const selectField = await table.getField(field.id)
+          let options = await selectField.getOptions()
+          
+          // 检查选项是否已存在
+          const existingOption = options.find(opt => opt.name === xhsData.author)
+          
+          if (!existingOption) {
+            // 添加新选项
+            await selectField.addOptions([{ name: xhsData.author }])
+            options = await selectField.getOptions()  // 重新获取选项
+          }
+          
+          // 设置字段值
+          const selectedOption = options.find(opt => opt.name === xhsData.author)
+          if (selectedOption) {
+            fieldMap[field.id] = { id: selectedOption.id, text: selectedOption.name }
+          }
+        } catch (err) {
+          console.error(`处理[博主]字段出错:`, err)
+          fieldMap[field.id] = xhsData.author  // 出错时回退到文本
+        }
         break
         
       case '标题':
@@ -352,6 +420,9 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
       case '笔记发布时间':
         // fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
         fieldMap[field.id] = new Date(xhsData.publish_time).getTime();
+        const fieldInstance = await table.getField(field.id);
+        const fieldType = await fieldInstance.getType();
+        console.log(fieldType);
         break
         
       case '笔记标签词':
