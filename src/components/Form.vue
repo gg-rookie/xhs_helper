@@ -67,6 +67,27 @@ const progress = ref({
   message: '准备开始处理...'
 })
 
+// 调用小红书详情API
+const callXhsDetailApi = async (url) => {
+  try {
+    const response = await fetch('https://nibelungen.site/xhs/xhs_detail', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        cookie: formData.value.cookie,
+      }),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    const result = await response.json()
+    if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
+    return result.data
+  } catch (error) {
+    console.error('API调用失败:', error)
+    return null
+  }
+}
+
 // 调用小红书作者笔记API
 const callXhsAuthorNotesApi = async () => {
   try {
@@ -115,7 +136,7 @@ const fetchAuthorNotes = async () => {
     
     authorNotes.value = result.notes.map(noteUrl => ({
       rawUrl: noteUrl,
-      displayUrl: noteUrl.split('?')[0] // 去除参数显示
+      displayUrl: noteUrl.split('?')[0]
     }))
     
     showAuthorNotesDialog.value = true
@@ -127,6 +148,308 @@ const fetchAuthorNotes = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// 优化后的图片上传方法
+const uploadFileToBitable = async (url) => {
+  try {
+    const response = await fetch('https://nibelungen.site/xhs/proxy-image', {
+      method: 'POST',
+      headers: { 
+        'Content-Type': 'application/json'  // 必须设置
+      },
+      body: JSON.stringify({
+        url: encodeURIComponent(url)  // 发送 JSON 数据
+      })
+    })
+    
+    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
+    
+    const blob = await response.blob()
+    const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, '') || `image_${Date.now()}`
+    const jpgFilename = `${filename}.jpg`
+    
+    return {
+      token: await convertBlobToJpgToken(blob, jpgFilename),
+      name: jpgFilename,
+      type: 'image/jpeg',
+      timeStamp: Date.now(),
+      size: blob.size
+    }
+  } catch (error) {
+    console.error('文件上传失败:', error)
+    throw error
+  }
+}
+
+// 更新记录
+const updateRecords = async () => {
+  if (!formData.value.cookie) {
+    updateProgress('请先输入小红书Cookie', 'exception')
+    return
+  }
+
+  try {
+    loading.value = true
+    resetProgress()
+    updateProgress('正在初始化处理...')
+
+    const { tableId, viewId } = await bitable.base.getSelection()
+    if (!tableId) {
+      updateProgress('请先选择数据表', 'exception')
+      loading.value = false
+      return
+    }
+
+    const recordIds = await bitable.ui.selectRecordIdList(tableId, viewId)
+    if (!recordIds?.length) {
+      updateProgress('请选择要更新的记录', 'exception')
+      loading.value = false
+      return
+    }
+
+    const table = await bitable.base.getTable(tableId)
+    const allFields = await table.getFieldMetaList()
+
+    const linkFieldMeta = allFields.find(f => f.name === '链接')
+    if (!linkFieldMeta) {
+      updateProgress('未找到"链接"字段', 'exception')
+      loading.value = false
+      return
+    }
+
+    const linkField = await table.getFieldById(linkFieldMeta.id)
+    const fieldValues = await linkField.getFieldValueList()
+    const selectedRecords = fieldValues.filter(fv => recordIds.includes(fv.record_id))
+
+    progress.value.total = selectedRecords.length
+    showProgressDialog.value = true
+    updateProgress(`开始处理 ${selectedRecords.length} 条记录...`)
+
+    for (const fv of selectedRecords) {
+      try {
+        const recordId = fv.record_id
+        const url = fv.value?.[0]?.text
+
+        if (!url) {
+          progress.value.skipped++
+          updateProgress(`记录 ${recordId} 跳过：链接为空`)
+          progress.value.current++
+          updateProgressPercent()
+          continue
+        }
+
+        updateProgress(`处理记录 ${recordId}: 获取数据中...`)
+        const xhsData = await callXhsDetailApi(url)
+        
+        if (!xhsData) {
+          progress.value.failed++
+          updateProgress(`记录 ${recordId} 失败：接口返回为空`, 'warning')
+        } else {
+          updateProgress(`处理记录 ${recordId}: 格式化数据中...`)
+          const updateFields = await formatXhsDataToFields(xhsData, allFields, table)
+
+          if (Object.keys(updateFields).length > 0) {
+            updateProgress(`处理记录 ${recordId}: 写入数据中...`)
+            await table.setRecord(recordId, { fields: updateFields })
+            progress.value.success++
+            updateProgress(`记录 ${recordId} 更新成功`)
+          } else {
+            progress.value.skipped++
+            updateProgress(`记录 ${recordId} 跳过：无匹配字段`)
+          }
+        }
+      } catch (err) {
+        progress.value.failed++
+        console.error(`记录处理失败:`, err)
+        updateProgress(`处理失败：${err.message}`, 'exception')
+      } finally {
+        progress.value.current++
+        updateProgressPercent()
+      }
+    }
+
+    updateProgress('处理完成！')
+    if (progress.value.failed === 0 && progress.value.success > 0) {
+      progress.value.status = 'success'
+    } else if (progress.value.failed > 0 && progress.value.success > 0) {
+      progress.value.status = 'warning'
+    } else {
+      progress.value.status = 'exception'
+    }
+  } catch (err) {
+    console.error('全局错误：', err)
+    updateProgress(`处理过程中发生错误: ${err.message}`, 'exception')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 格式化小红书数据为飞书字段
+const formatXhsDataToFields = async (xhsData, allFields, table) => {
+  const fieldMap = {}
+  
+  for (const field of allFields) {
+    const fieldName = field.name.trim()
+    
+    switch (fieldName) {
+      case '博主':  // 处理单选字段
+        try {
+          const fieldInstance = await table.getField(field.id)
+          const fieldType = await fieldInstance.getType()
+          
+          if (fieldType !== 3) {  // 如果不是单选字段，直接赋值文本
+            fieldMap[field.id] = xhsData.author
+            break
+          }
+
+          // 获取单选字段的选项
+          const selectField = await table.getField(field.id)
+          let options = await selectField.getOptions()
+          
+          // 检查选项是否已存在
+          const existingOption = options.find(opt => opt.name === xhsData.author)
+          
+          if (!existingOption) {
+            // 添加新选项
+            await selectField.addOptions([{ name: xhsData.author }])
+            options = await selectField.getOptions()  // 重新获取选项
+          }
+          
+          // 设置字段值
+          const selectedOption = options.find(opt => opt.name === xhsData.author)
+          if (selectedOption) {
+            fieldMap[field.id] = { id: selectedOption.id, text: selectedOption.name }
+          }
+        } catch (err) {
+          console.error(`处理[博主]字段出错:`, err)
+          fieldMap[field.id] = xhsData.author  // 出错时回退到文本
+        }
+        break
+        
+      case '标题':
+        fieldMap[field.id] = xhsData.title
+        break
+        
+      case '文案':
+        fieldMap[field.id] = xhsData.content
+        break
+        
+      case '喜欢数':
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.like_count)
+        break
+        
+      case '评论数':
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.comment_count)
+        break
+        
+      case '收藏数':
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.collected_count)
+        break
+        
+      case '分享数':
+        fieldMap[field.id] = parseNumberWithUnits(xhsData.share_count)
+        break
+        
+      case '发布地点':
+        fieldMap[field.id] = xhsData.location
+        break
+        
+      case '笔记发布时间':
+        try {
+          const timestamp = xhsData.publish_time || xhsData.lastUpdateTime
+          const date = new Date(timestamp)
+          
+          const fieldInstance = await table.getField(field.id)
+          const fieldType = await fieldInstance.getType()
+          
+          if (fieldType === FieldType.DateTime) {
+            fieldMap[field.id] = date.getTime()
+          } else {
+            fieldMap[field.id] = xhsData.publish_time_format || 
+              `${date.getFullYear()}-${(date.getMonth()+1).toString().padStart(2,'0')}-${date.getDate().toString().padStart(2,'0')} ` +
+              `${date.getHours().toString().padStart(2,'0')}:${date.getMinutes().toString().padStart(2,'0')}:${date.getSeconds().toString().padStart(2,'0')}`
+          }
+        } catch (e) {
+          console.error('处理发布时间出错:', e)
+          fieldMap[field.id] = xhsData.publish_time_format || ''
+        }
+        break
+        
+      case '笔记标签词':
+        try {
+          const fieldInstance = await table.getField(field.id)
+          const fieldType = await fieldInstance.getType()
+          
+          if (fieldType !== FieldType.MultiSelect) {
+            fieldMap[field.id] = Array.isArray(xhsData.tag_list) 
+              ? xhsData.tag_list.join(', ')
+              : xhsData.tag_list || ''
+            break
+          }
+
+          const multiSelectField = await table.getField(field.id)
+          let options = await multiSelectField.getOptions()
+          
+          const rawTags = xhsData.tag_list || []
+          const tags = Array.isArray(rawTags) ? rawTags : rawTags.split(/[,，]/)
+          
+          const newTags = tags.filter(tag => !options.some(opt => opt.name === tag))
+          if (newTags.length > 0) {
+            await multiSelectField.addOptions(newTags.map(name => ({ name })))
+            options = await multiSelectField.getOptions()
+          }
+          
+          fieldMap[field.id] = tags
+            .map(tag => {
+              const option = options.find(opt => opt.name === tag)
+              return option ? { id: option.id, text: option.name } : null
+            })
+            .filter(Boolean)
+            
+        } catch (err) {
+          console.error(`处理[笔记标签词]字段出错:`, err)
+          fieldMap[field.id] = []
+        }
+        break
+        
+      case '笔记图片':
+        if (xhsData.images_link?.length > 0) {
+          try {
+            const attachments = []
+            
+            // 限制最多处理5张图片
+            for (const url of xhsData.images_link.slice(0, 5)) {
+              try {
+                const attachment = await uploadFileToBitable(url)
+                attachments.push(attachment)
+                // 添加延迟防止请求过于频繁
+                await new Promise(resolve => setTimeout(resolve, 800))
+              } catch (e) {
+                console.error(`处理图片失败: ${url}`, e)
+              }
+            }
+            
+            fieldMap[field.id] = attachments
+          } catch (err) {
+            console.error('处理附件字段失败:', err)
+            fieldMap[field.id] = []
+          }
+        } else {
+          fieldMap[field.id] = []
+        }
+        break
+        
+      case '视频保存':
+        fieldMap[field.id] = xhsData.video_url ?? ''
+        break
+        
+      default:
+        break
+    }
+  }
+  
+  return fieldMap
 }
 
 // 导入作者笔记到表格
@@ -151,7 +474,6 @@ const importAuthorNotesToTable = async () => {
     const table = await bitable.base.getTable(tableId)
     const allFields = await table.getFieldMetaList()
 
-    // 确保链接字段存在
     let linkField = allFields.find(f => f.name === '链接')
     if (!linkField) {
       updateProgress('正在创建链接字段...')
@@ -165,22 +487,19 @@ const importAuthorNotesToTable = async () => {
     showProgressDialog.value = true
     updateProgress(`开始导入 ${authorNotes.value.length} 条笔记...`)
 
-    // 分批处理（每次处理10条）
     const batchSize = 10
     for (let i = 0; i < authorNotes.value.length; i += batchSize) {
       const batchNotes = authorNotes.value.slice(i, i + batchSize)
       
-      const records = batchNotes.map(note => {
-        return {
-          fields: {
-            [linkField.id]: [{
-              text: note.displayUrl,  // 显示原始链接
-              link: note.rawUrl,      // 保留完整链接
-              type: 'url'
-            }]
-          }
+      const records = batchNotes.map(note => ({
+        fields: {
+          [linkField.id]: [{
+            text: note.displayUrl,
+            link: note.rawUrl,
+            type: 'url'
+          }]
         }
-      })
+      }))
 
       try {
         updateProgress(`正在导入第 ${i + 1}-${i + batchNotes.length} 条笔记...`)
@@ -191,7 +510,6 @@ const importAuthorNotesToTable = async () => {
         progress.value.failed += batchNotes.length
         updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
         
-        // 失败后尝试单条导入
         for (const note of batchNotes) {
           try {
             await table.addRecord({
@@ -271,6 +589,45 @@ const updateProgressPercent = () => {
   )
 }
 
+// 带单位的数字解析
+function parseNumberWithUnits(input) {
+  if (input == null || input === '') return 0
+  if (typeof input === 'number') return input
+  
+  const str = String(input).trim()
+  if (/^[\d,]+$/.test(str)) {
+    return parseInt(str.replace(/,/g, ''), 10)
+  }
+  
+  const unitMap = {
+    '十': 10, '百': 100,
+    '千': 1000, 'k': 1000, 'K': 1000,
+    '万': 10000, 'w': 10000, 'W': 10000,
+    '亿': 100000000,
+    'm': 1000000, 'M': 1000000,
+    'b': 1000000000, 'B': 1000000000
+  }
+  
+  const match = str.match(/^([\d.,]+)\s*([^\d.]*)$/)
+  if (!match) return 0
+  
+  const numPart = match[1].replace(/,/g, '')
+  const unitPart = match[2].toLowerCase()
+  const num = parseFloat(numPart)
+  if (isNaN(num)) return 0
+  
+  if (!unitPart) return num
+  if (unitPart.includes('万') || unitPart.includes('w')) return num * 10000
+  
+  for (const unit in unitMap) {
+    if (unitPart.includes(unit.toLowerCase())) {
+      return num * unitMap[unit]
+    }
+  }
+  
+  return num
+}
+
 onMounted(() => {
   document.title = '小红书助手 - 详情批量更新'
 })
@@ -339,6 +696,17 @@ onMounted(() => {
           <el-icon><CircleCheck /></el-icon>
           获取作者笔记
         </el-button>
+        
+        <el-button
+          type="success"
+          @click="updateRecords"
+          :loading="loading"
+          :disabled="!formData.cookie"
+          size="large"
+        >
+          <el-icon><CircleCheck /></el-icon>
+          批量更新笔记详情
+        </el-button>
       </div>
     </el-card>
 
@@ -362,6 +730,7 @@ onMounted(() => {
             <div>进度: {{ progress.current }}/{{ progress.total }}</div>
             <span class="success">成功: {{ progress.success }}</span>
             <span class="failed">失败: {{ progress.failed }}</span>
+            <span class="skipped">跳过: {{ progress.skipped }}</span>
           </div>
         </div>
       </div>
@@ -476,6 +845,11 @@ onMounted(() => {
 
 .failed {
   color: #f56c6c;
+  font-weight: bold;
+}
+
+.skipped {
+  color: #909399;
   font-weight: bold;
 }
 
