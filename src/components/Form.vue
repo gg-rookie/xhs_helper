@@ -413,30 +413,49 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         }
         break
         
+      // case '笔记图片':
+      //   if (xhsData.images_link?.length > 0) {
+      //     try {
+      //       const attachments = []
+            
+      //       // 限制最多处理5张图片
+      //       for (const url of xhsData.images_link.slice(0, 5)) {
+      //         try {
+      //           const attachment = await uploadFileToBitable(url)
+      //           attachments.push(attachment)
+      //           // 添加延迟防止请求过于频繁
+      //           await new Promise(resolve => setTimeout(resolve, 800))
+      //         } catch (e) {
+      //           console.error(`处理图片失败: ${url}`, e)
+      //         }
+      //       }
+            
+      //       fieldMap[field.id] = attachments
+      //     } catch (err) {
+      //       console.error('处理附件字段失败:', err)
+      //       fieldMap[field.id] = []
+      //     }
+      //   } else {
+      //     fieldMap[field.id] = []
+      //   }
+      //   break
+
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
-          try {
-            const attachments = []
-            
-            // 限制最多处理5张图片
-            for (const url of xhsData.images_link.slice(0, 5)) {
-              try {
-                const attachment = await uploadFileToBitable(url)
-                attachments.push(attachment)
-                // 添加延迟防止请求过于频繁
-                await new Promise(resolve => setTimeout(resolve, 800))
-              } catch (e) {
-                console.error(`处理图片失败: ${url}`, e)
-              }
-            }
-            
-            fieldMap[field.id] = attachments
-          } catch (err) {
-            console.error('处理附件字段失败:', err)
-            fieldMap[field.id] = []
-          }
+          // 将图片链接处理为文本或超链接
+          // 这里可以根据需要选择以下两种方式之一：
+          
+          // 方式1: 纯文本链接，用逗号分隔
+          // fieldMap[field.id] = xhsData.images_link.slice(0, 5).join(', ')
+          
+          // 方式2: 超链接文本（如果字段支持超链接）
+          fieldMap[field.id] = xhsData.images_link.slice(0, 5).map(url => ({
+            text: "查看图片",
+            link: url,
+            type: "url"
+          }))
         } else {
-          fieldMap[field.id] = []
+          fieldMap[field.id] = ''
         }
         break
         
@@ -666,12 +685,11 @@ onMounted(() => {
         </el-form-item>
         
         <el-form-item label="最小点赞数">
-          <el-slider
+          <el-input-number
             v-model="formData.likes_count"
             :min="0"
             :max="10000"
             :step="100"
-            show-input
           />
         </el-form-item>
         
