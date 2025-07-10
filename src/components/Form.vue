@@ -442,22 +442,16 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
 
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
-          // 将图片链接处理为文本或超链接
-          // 这里可以根据需要选择以下两种方式之一：
-          
-          // 方式1: 纯文本链接，用逗号分隔
-          // fieldMap[field.id] = xhsData.images_link.slice(0, 5).join(', ')
-          
-          // 方式2: 超链接文本（如果字段支持超链接）
-          fieldMap[field.id] = xhsData.images_link.slice(0, 5).map(url => ({
-            text: "查看图片",
-            link: url,
-            type: "url"
-          }))
+            // 方式3: 显示为图1、图2等带序号的超链接
+            fieldMap[field.id] = xhsData.images_link.map((url, index) => ({
+                text: `图${index + 1}`,
+                link: url,
+                type: "url"
+            }))
         } else {
-          fieldMap[field.id] = ''
+            fieldMap[field.id] = ''
         }
-        break
+      break
         
       case '视频保存':
         fieldMap[field.id] = xhsData.video_url ?? ''
