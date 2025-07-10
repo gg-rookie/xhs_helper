@@ -136,7 +136,7 @@ const fetchAuthorNotes = async () => {
     
     authorNotes.value = result.notes.map(noteUrl => ({
       rawUrl: noteUrl,
-      displayUrl: noteUrl.split('?')[0]
+      displayUrl: noteUrl
     }))
     
     showAuthorNotesDialog.value = true
