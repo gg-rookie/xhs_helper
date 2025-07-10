@@ -11,12 +11,24 @@ import {
   ElDivider,
   ElCard,
   ElDialog,
+  ElSlider,
+  ElInputNumber,
+  ElTable,
+  ElTableColumn,
+  ElLink,
 } from 'element-plus'
 import { CircleCheck, Close } from '@element-plus/icons-vue'
 
-const formData = ref({ cookie: '' })
+const formData = ref({ 
+  cookie: '',
+  author_url: '',
+  likes_count: 0,
+  max_count: 30
+})
 const loading = ref(false)
 const showProgressDialog = ref(false)
+const showAuthorNotesDialog = ref(false)
+const authorNotes = ref([])
 const progress = ref({
   percent: 0,
   status: 'success',
@@ -46,6 +58,137 @@ const callXhsDetailApi = async (url) => {
   } catch (error) {
     console.error('API调用失败:', error)
     return null
+  }
+}
+
+// 调用小红书作者笔记API
+const callXhsAuthorNotesApi = async () => {
+  try {
+    const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes_1000', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: formData.value.author_url,
+        cookie: formData.value.cookie,
+        likes_count: formData.value.likes_count,
+        max_count: formData.value.max_count,
+      }),
+    })
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    const result = await response.json()
+    if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
+    return result.data
+  } catch (error) {
+    console.error('API调用失败:', error)
+    return null
+  }
+}
+
+// 获取作者笔记
+const fetchAuthorNotes = async () => {
+  if (!formData.value.cookie) {
+    updateProgress('请先输入小红书Cookie', 'exception')
+    return
+  }
+  
+  if (!formData.value.author_url) {
+    updateProgress('请先输入作者主页URL', 'exception')
+    return
+  }
+
+  try {
+    loading.value = true
+    resetProgress()
+    updateProgress('正在获取作者笔记...')
+    
+    const result = await callXhsAuthorNotesApi()
+    if (!result || !result.notes) {
+      updateProgress('获取作者笔记失败', 'exception')
+      return
+    }
+    
+    authorNotes.value = result.notes
+    showAuthorNotesDialog.value = true
+    updateProgress('获取作者笔记成功', 'success')
+    
+  } catch (error) {
+    console.error('获取作者笔记失败:', error)
+    updateProgress(`获取作者笔记失败: ${error.message}`, 'exception')
+  } finally {
+    loading.value = false
+  }
+}
+
+// 将作者笔记导入到表格
+const importAuthorNotesToTable = async () => {
+  if (!authorNotes.value.length) {
+    updateProgress('没有可导入的笔记数据', 'warning')
+    return
+  }
+
+  try {
+    loading.value = true
+    resetProgress()
+    updateProgress('准备导入笔记数据...')
+    
+    const { tableId, viewId } = await bitable.base.getSelection()
+    if (!tableId) {
+      updateProgress('请先选择数据表', 'exception')
+      loading.value = false
+      return
+    }
+
+    const table = await bitable.base.getTable(tableId)
+    const allFields = await table.getFieldMetaList()
+
+    // 查找链接字段
+    const linkField = allFields.find(f => f.name === '链接')
+    if (!linkField) {
+      updateProgress('未找到"链接"字段，请确保表格中有链接字段', 'exception')
+      loading.value = false
+      return
+    }
+
+    progress.value.total = authorNotes.value.length
+    showProgressDialog.value = true
+    updateProgress(`开始导入 ${authorNotes.value.length} 条笔记...`)
+
+    // 批量添加记录
+    const batchSize = 10  // 每次批量处理10条
+    for (let i = 0; i < authorNotes.value.length; i += batchSize) {
+      const batchNotes = authorNotes.value.slice(i, i + batchSize)
+      
+      // 准备批量添加的数据
+      const records = batchNotes.map(note => {
+        return {
+          fields: {
+            [linkField.id]: [{ text: note.url, type: 'url' }],
+            // 可以添加其他字段的初始值
+          }
+        }
+      })
+
+      try {
+        updateProgress(`正在导入第 ${i + 1}-${i + batchNotes.length} 条笔记...`)
+        await table.addRecords(records)
+        progress.value.success += batchNotes.length
+      } catch (err) {
+        console.error('批量导入失败:', err)
+        progress.value.failed += batchNotes.length
+        updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
+      } finally {
+        progress.value.current += batchNotes.length
+        updateProgressPercent()
+      }
+    }
+
+    updateProgress('笔记导入完成!', progress.value.failed > 0 ? 'warning' : 'success')
+  } catch (err) {
+    console.error('导入笔记出错:', err)
+    updateProgress(`导入失败: ${err.message}`, 'exception')
+  } finally {
+    loading.value = false
+    showAuthorNotesDialog.value = false
   }
 }
 
@@ -84,7 +227,7 @@ const updateProgressPercent = () => {
 
 // 强制使用JPG格式
 function getMimeTypeFromUrl() {
-  return 'image/jpeg' // 强制返回JPG类型
+  return 'image/jpeg'
 }
 
 // 带单位的数字解析
@@ -134,7 +277,6 @@ const uploadFileToBitable = async (url) => {
     if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
     
     const blob = await response.blob()
-    // 强制使用JPG格式
     const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, '') || `image_${Date.now()}`
     const jpgFilename = `${filename}.jpg`
     
@@ -154,10 +296,9 @@ const uploadFileToBitable = async (url) => {
 // 将Blob转换为JPG格式并上传
 const convertBlobToJpgToken = async (blob, filename) => {
   try {
-    // 如果是图片但不是JPG，需要转换（这里简化处理，实际可能需要canvas转换）
     const file = blob.type === 'image/jpeg' 
       ? new File([blob], filename, { type: 'image/jpeg' })
-      : new File([blob], filename, { type: 'image/jpeg' }) // 强制设置为JPG
+      : new File([blob], filename, { type: 'image/jpeg' })
     
     const tokens = await bitable.base.batchUploadFile([file])
     if (!tokens || !tokens.length) throw new Error('No file token returned')
@@ -209,7 +350,8 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         break
         
       case '笔记发布时间':
-        fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
+        // fieldMap[field.id] = new Date(xhsData.publish_time).toISOString()
+        fieldMap[field.id] = new Date(xhsData.publish_time).getTime();
         break
         
       case '笔记标签词':
@@ -396,12 +538,13 @@ onMounted(() => {
 
 <template>
   <div class="container">
-    <h1>小红书详情批量更新</h1>
+    <h1>小红书助手 - 详情批量更新</h1>
 
     <el-alert title="使用说明" type="info" :closable="false">
-      1. 输入小红书Cookie <br />
-      2. 点击按钮后选择要更新的记录 <br />
-      3. 系统将自动匹配并更新所有可用字段
+      1. 输入小红书Cookie和作者主页URL<br />
+      2. 设置筛选条件（点赞数、获取数量）<br />
+      3. 获取笔记后可以导入到表格<br />
+      4. 也可以直接更新已有链接的笔记数据
     </el-alert>
 
     <el-divider />
@@ -416,18 +559,56 @@ onMounted(() => {
             clearable
           />
         </el-form-item>
+        
+        <el-form-item label="作者主页URL" required>
+          <el-input
+            v-model="formData.author_url"
+            placeholder="输入小红书作者主页URL"
+            clearable
+          />
+        </el-form-item>
+        
+        <el-form-item label="最小点赞数">
+          <el-slider
+            v-model="formData.likes_count"
+            :min="0"
+            :max="10000"
+            :step="100"
+            show-input
+          />
+        </el-form-item>
+        
+        <el-form-item label="最大获取数量">
+          <el-input-number
+            v-model="formData.max_count"
+            :min="1"
+            :max="1000"
+            :step="10"
+          />
+        </el-form-item>
       </el-form>
 
       <div class="action-area">
         <el-button
           type="primary"
+          @click="fetchAuthorNotes"
+          :loading="loading"
+          :disabled="!formData.cookie || !formData.author_url"
+          size="large"
+        >
+          <el-icon><CircleCheck /></el-icon>
+          获取作者笔记
+        </el-button>
+        
+        <el-button
+          type="success"
           @click="updateRecords"
           :loading="loading"
           :disabled="!formData.cookie"
           size="large"
         >
           <el-icon><CircleCheck /></el-icon>
-          开始更新数据
+          更新笔记数据
         </el-button>
       </div>
     </el-card>
@@ -468,99 +649,113 @@ onMounted(() => {
         </el-button>
       </template>
     </el-dialog>
+    
+    <el-dialog
+      v-model="showAuthorNotesDialog"
+      title="作者笔记列表"
+      width="80%"
+      top="5vh"
+    >
+      <el-table 
+        :data="authorNotes" 
+        border 
+        style="width: 100%"
+        height="70vh"
+        highlight-current-row
+      >
+        <el-table-column prop="title" label="标题" width="200" />
+        <el-table-column prop="like_count" label="点赞数" width="100" align="center" />
+        <el-table-column prop="comment_count" label="评论数" width="100" align="center" />
+        <el-table-column prop="collected_count" label="收藏数" width="100" align="center" />
+        <el-table-column prop="publish_time" label="发布时间" width="180" />
+        <el-table-column prop="url" label="链接">
+          <template #default="{ row }">
+            <el-link type="primary" :href="row.url" target="_blank" :underline="false">
+              {{ row.url }}
+            </el-link>
+          </template>
+        </el-table-column>
+      </el-table>
+      
+      <template #footer>
+        <el-button
+          type="primary"
+          @click="importAuthorNotesToTable"
+          :loading="loading"
+        >
+          导入到表格
+        </el-button>
+        <el-button
+          @click="showAuthorNotesDialog = false"
+          icon="Close"
+        >
+          关闭
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <style scoped>
 .container {
   padding: 20px;
-  max-width: 800px;
+  max-width: 1000px;
   margin: 0 auto;
 }
 
-h1 {
-  text-align: center;
-  color: #ff2442;
+.config-card {
   margin-bottom: 20px;
 }
 
-.config-card {
-  margin-top: 20px;
-}
-
 .action-area {
+  display: flex;
+  justify-content: space-between;
   margin-top: 20px;
-  text-align: center;
+  gap: 20px;
 }
 
 .progress-details {
   margin-top: 20px;
-  padding: 15px 20px;
-  background-color: #f8f8f8;
-  border-radius: 4px;
-  max-width: 100%;
-  box-sizing: border-box;
-  word-break: break-word;
+  text-align: center;
 }
 
 .progress-message {
-  font-size: 14px;
+  font-size: 16px;
   margin-bottom: 10px;
-  color: #333;
-  white-space: normal;
+  font-weight: bold;
 }
 
 .progress-stats {
   font-size: 14px;
-  display: flex;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.progress-stats > div:first-child {
-  flex: 1 1 100%;
-  margin-bottom: 8px;
 }
 
 .stats-row {
   display: flex;
-  gap: 15px;
+  justify-content: space-between;
+  margin-top: 10px;
   flex-wrap: wrap;
-  flex: 1 1 auto;
-}
-
-.stats-row span {
-  white-space: nowrap;
 }
 
 .success {
   color: #67c23a;
+  font-weight: bold;
 }
 
 .failed {
   color: #f56c6c;
+  font-weight: bold;
 }
 
 .skipped {
-  color: #e6a23c;
+  color: #909399;
+  font-weight: bold;
 }
 
-::v-deep(.el-dialog__body) {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 20px 0;
+.el-table {
+  margin-top: 10px;
 }
 
-::v-deep(water-tank-progress) {
-  margin: 0 auto 20px;
-}
-
-::v-deep(.progress-details) {
-  width: 100%;
-  max-width: 320px;
-  text-align: center;
+.el-dialog__body {
+  padding-top: 10px;
 }
 </style>
