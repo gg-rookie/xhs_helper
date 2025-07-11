@@ -819,7 +819,7 @@ onMounted(() => {
           :page-size="20"
           :total="pagination.total"
           :current-page="pagination.current_page"
-          @current-change="fetchAuthorNotes"
+  @current-change="(page) => fetchAuthorNotes(page)"
           hide-on-single-page
         />
         
