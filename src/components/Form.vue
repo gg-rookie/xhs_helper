@@ -122,6 +122,9 @@ const callXhsDetailApi = async (url) => {
 // 调用小红书作者笔记API
 const callXhsAuthorNotesApi = async (cursor = '') => {
   try {
+    // 确保cursor是字符串
+    const cleanCursor = typeof cursor === 'string' ? cursor : ''
+    
     const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes_1000', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -130,7 +133,7 @@ const callXhsAuthorNotesApi = async (cursor = '') => {
         cookie: formData.value.cookie,
         likes_count: formData.value.likes_count,
         max_count: formData.value.max_count,
-        cursor: cursor
+        cursor: cleanCursor
       }),
     })
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
@@ -149,8 +152,19 @@ const callXhsAuthorNotesApi = async (cursor = '') => {
   }
 }
 
+// 处理页码变化
+const handlePageChange = (page) => {
+  console.log('页码变化:', page)
+  // 第一页使用空cursor，其他页使用当前cursor
+  const cursor = page === 1 ? '' : pagination.value.cursor
+  fetchAuthorNotes(cursor, false)
+}
+
 // 获取作者笔记
 const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
+  // 防御：确保cursor是字符串
+  const cleanCursor = typeof cursor === 'string' ? cursor : ''
+  
   if (!formData.value.cookie) {
     updateProgress('请先输入小红书Cookie', 'exception')
     return
@@ -165,13 +179,15 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
     loading.value = true
     if (!isLoadMore) {
       resetProgress()
-      authorNotes.value = []
+      if (cleanCursor === '') { // 只有全新加载时清空数据
+        authorNotes.value = []
+      }
       pagination.value.current_page = 1
     }
     
     updateProgress('正在获取作者笔记...')
     
-    const result = await callXhsAuthorNotesApi(cursor)
+    const result = await callXhsAuthorNotesApi(cleanCursor)
     if (!result || !result.notes) {
       updateProgress('获取作者笔记失败', 'exception')
       return
@@ -185,7 +201,11 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
     if (isLoadMore) {
       authorNotes.value = [...authorNotes.value, ...newNotes]
     } else {
-      authorNotes.value = newNotes
+      if (cleanCursor === '') { // 全新加载
+        authorNotes.value = newNotes
+      } else {
+        // 分页加载，保留现有数据
+      }
     }
     
     // 更新分页信息
@@ -193,7 +213,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       cursor: result.cursor || '',
       has_more: result.has_more || false,
       current_page: isLoadMore ? pagination.value.current_page + 1 : 1,
-      total: isLoadMore ? pagination.value.total + newNotes.length : newNotes.length
+      total: result.total_count || (isLoadMore ? pagination.value.total + newNotes.length : newNotes.length)
     }
     
     showAuthorNotesDialog.value = true
@@ -209,7 +229,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
 
 // 加载更多笔记
 const loadMoreNotes = () => {
-  if (pagination.value.has_more && pagination.value.cursor) {
+  if (pagination.value.has_more) {
     fetchAuthorNotes(pagination.value.cursor, true)
   }
 }
@@ -331,37 +351,33 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
     const fieldName = field.name.trim()
     
     switch (fieldName) {
-      case '博主':  // 处理单选字段
+      case '博主':
         try {
           const fieldInstance = await table.getField(field.id)
           const fieldType = await fieldInstance.getType()
           
-          if (fieldType !== 3) {  // 如果不是单选字段，直接赋值文本
+          if (fieldType !== 3) {
             fieldMap[field.id] = xhsData.author
             break
           }
 
-          // 获取单选字段的选项
           const selectField = await table.getField(field.id)
           let options = await selectField.getOptions()
           
-          // 检查选项是否已存在
           const existingOption = options.find(opt => opt.name === xhsData.author)
           
           if (!existingOption) {
-            // 添加新选项
             await selectField.addOptions([{ name: xhsData.author }])
-            options = await selectField.getOptions()  // 重新获取选项
+            options = await selectField.getOptions()
           }
           
-          // 设置字段值
           const selectedOption = options.find(opt => opt.name === xhsData.author)
           if (selectedOption) {
             fieldMap[field.id] = { id: selectedOption.id, text: selectedOption.name }
           }
         } catch (err) {
           console.error(`处理[博主]字段出错:`, err)
-          fieldMap[field.id] = xhsData.author  // 出错时回退到文本
+          fieldMap[field.id] = xhsData.author
         }
         break
         
@@ -654,7 +670,6 @@ function parseNumberWithUnits(input) {
 onMounted(() => {
   document.title = '小红书助手 - 详情批量更新'
   
-  // 检查cookie是否存在
   if (formData.value.cookie) {
     ElMessage.success('已加载保存的Cookie')
   }
@@ -720,7 +735,7 @@ onMounted(() => {
       <div class="action-area">
         <el-button
           type="primary"
-          @click="fetchAuthorNotes"
+          @click="() => fetchAuthorNotes('', false)"
           :loading="loading"
           :disabled="!formData.cookie || !formData.author_url"
           size="large"
@@ -819,7 +834,7 @@ onMounted(() => {
           :page-size="20"
           :total="pagination.total"
           :current-page="pagination.current_page"
-  @current-change="(page) => fetchAuthorNotes(page)"
+          @current-change="handlePageChange"
           hide-on-single-page
         />
         
