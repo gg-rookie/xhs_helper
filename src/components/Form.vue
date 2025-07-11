@@ -16,9 +16,10 @@ import {
   ElLink,
   ElMessage,
   ElSlider,
-  ElInputNumber
+  ElInputNumber,
+  ElPagination
 } from 'element-plus'
-import { CircleCheck, Close } from '@element-plus/icons-vue'
+import { CircleCheck, Close, Refresh } from '@element-plus/icons-vue'
 
 const FieldType = {
   Text: 1,
@@ -44,8 +45,18 @@ const FieldType = {
   AutoNumber: 1005
 }
 
+// 从本地存储加载cookie
+const loadCookieFromStorage = () => {
+  return localStorage.getItem('xhs_cookie') || ''
+}
+
+// 保存cookie到本地存储
+const saveCookieToStorage = (cookie) => {
+  localStorage.setItem('xhs_cookie', cookie)
+}
+
 const formData = ref({
-  cookie: '',
+  cookie: loadCookieFromStorage(),
   author_url: '',
   likes_count: 0,
   max_count: 30
@@ -55,6 +66,12 @@ const loading = ref(false)
 const showProgressDialog = ref(false)
 const showAuthorNotesDialog = ref(false)
 const authorNotes = ref([])
+const pagination = ref({
+  cursor: '',
+  has_more: false,
+  current_page: 1,
+  total: 0
+})
 
 const progress = ref({
   percent: 0,
@@ -66,6 +83,14 @@ const progress = ref({
   skipped: 0,
   message: '准备开始处理...'
 })
+
+// 检查API响应是否cookie过期
+const checkCookieExpired = (response) => {
+  if (response.code === -1 && response.msg.includes('登录')) {
+    return true
+  }
+  return false
+}
 
 // 调用小红书详情API
 const callXhsDetailApi = async (url) => {
@@ -80,6 +105,12 @@ const callXhsDetailApi = async (url) => {
     })
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const result = await response.json()
+    
+    if (checkCookieExpired(result)) {
+      ElMessage.error('Cookie已过期，请更新Cookie')
+      throw new Error('Cookie已过期')
+    }
+    
     if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
     return result.data
   } catch (error) {
@@ -89,7 +120,7 @@ const callXhsDetailApi = async (url) => {
 }
 
 // 调用小红书作者笔记API
-const callXhsAuthorNotesApi = async () => {
+const callXhsAuthorNotesApi = async (cursor = '') => {
   try {
     const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes_1000', {
       method: 'POST',
@@ -99,10 +130,17 @@ const callXhsAuthorNotesApi = async () => {
         cookie: formData.value.cookie,
         likes_count: formData.value.likes_count,
         max_count: formData.value.max_count,
+        cursor: cursor
       }),
     })
     if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
     const result = await response.json()
+    
+    if (checkCookieExpired(result)) {
+      ElMessage.error('Cookie已过期，请更新Cookie')
+      throw new Error('Cookie已过期')
+    }
+    
     if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
     return result.data
   } catch (error) {
@@ -112,7 +150,7 @@ const callXhsAuthorNotesApi = async () => {
 }
 
 // 获取作者笔记
-const fetchAuthorNotes = async () => {
+const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
   if (!formData.value.cookie) {
     updateProgress('请先输入小红书Cookie', 'exception')
     return
@@ -125,19 +163,38 @@ const fetchAuthorNotes = async () => {
 
   try {
     loading.value = true
-    resetProgress()
+    if (!isLoadMore) {
+      resetProgress()
+      authorNotes.value = []
+      pagination.value.current_page = 1
+    }
+    
     updateProgress('正在获取作者笔记...')
     
-    const result = await callXhsAuthorNotesApi()
+    const result = await callXhsAuthorNotesApi(cursor)
     if (!result || !result.notes) {
       updateProgress('获取作者笔记失败', 'exception')
       return
     }
     
-    authorNotes.value = result.notes.map(noteUrl => ({
+    const newNotes = result.notes.map(noteUrl => ({
       rawUrl: noteUrl,
       displayUrl: noteUrl
     }))
+    
+    if (isLoadMore) {
+      authorNotes.value = [...authorNotes.value, ...newNotes]
+    } else {
+      authorNotes.value = newNotes
+    }
+    
+    // 更新分页信息
+    pagination.value = {
+      cursor: result.cursor || '',
+      has_more: result.has_more || false,
+      current_page: isLoadMore ? pagination.value.current_page + 1 : 1,
+      total: isLoadMore ? pagination.value.total + newNotes.length : newNotes.length
+    }
     
     showAuthorNotesDialog.value = true
     updateProgress('获取作者笔记成功', 'success')
@@ -150,36 +207,17 @@ const fetchAuthorNotes = async () => {
   }
 }
 
-// 优化后的图片上传方法
-const uploadFileToBitable = async (url) => {
-  try {
-    const response = await fetch('https://nibelungen.site/xhs/proxy-image', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json'  // 必须设置
-      },
-      body: JSON.stringify({
-        url: encodeURIComponent(url)  // 发送 JSON 数据
-      })
-    })
-    
-    if (!response.ok) throw new Error(`Failed to fetch image: ${response.status}`)
-    
-    const blob = await response.blob()
-    const filename = url.split('/').pop()?.replace(/\.[^/.]+$/, '') || `image_${Date.now()}`
-    const jpgFilename = `${filename}.jpg`
-    
-    return {
-      token: await convertBlobToJpgToken(blob, jpgFilename),
-      name: jpgFilename,
-      type: 'image/jpeg',
-      timeStamp: Date.now(),
-      size: blob.size
-    }
-  } catch (error) {
-    console.error('文件上传失败:', error)
-    throw error
+// 加载更多笔记
+const loadMoreNotes = () => {
+  if (pagination.value.has_more && pagination.value.cursor) {
+    fetchAuthorNotes(pagination.value.cursor, true)
   }
+}
+
+// 保存cookie
+const handleCookieChange = (value) => {
+  formData.value.cookie = value
+  saveCookieToStorage(value)
 }
 
 // 更新记录
@@ -413,36 +451,8 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
         }
         break
         
-      // case '笔记图片':
-      //   if (xhsData.images_link?.length > 0) {
-      //     try {
-      //       const attachments = []
-            
-      //       // 限制最多处理5张图片
-      //       for (const url of xhsData.images_link.slice(0, 5)) {
-      //         try {
-      //           const attachment = await uploadFileToBitable(url)
-      //           attachments.push(attachment)
-      //           // 添加延迟防止请求过于频繁
-      //           await new Promise(resolve => setTimeout(resolve, 800))
-      //         } catch (e) {
-      //           console.error(`处理图片失败: ${url}`, e)
-      //         }
-      //       }
-            
-      //       fieldMap[field.id] = attachments
-      //     } catch (err) {
-      //       console.error('处理附件字段失败:', err)
-      //       fieldMap[field.id] = []
-      //     }
-      //   } else {
-      //     fieldMap[field.id] = []
-      //   }
-      //   break
-
       case '笔记图片':
         if (xhsData.images_link?.length > 0) {
-            // 方式3: 显示为图1、图2等带序号的超链接
             fieldMap[field.id] = xhsData.images_link.map((url, index) => ({
                 text: `图${index + 1}`,
                 link: url,
@@ -643,6 +653,11 @@ function parseNumberWithUnits(input) {
 
 onMounted(() => {
   document.title = '小红书助手 - 详情批量更新'
+  
+  // 检查cookie是否存在
+  if (formData.value.cookie) {
+    ElMessage.success('已加载保存的Cookie')
+  }
 })
 </script>
 
@@ -664,10 +679,15 @@ onMounted(() => {
         <el-form-item label="小红书Cookie" required>
           <el-input
             v-model="formData.cookie"
+            @change="handleCookieChange"
             placeholder="输入小红书Cookie"
             show-password
             clearable
-          />
+          >
+            <template #append>
+              <el-button :icon="Refresh" @click="formData.cookie = ''" />
+            </template>
+          </el-input>
         </el-form-item>
         
         <el-form-item label="作者主页URL" required>
@@ -768,7 +788,7 @@ onMounted(() => {
         :data="authorNotes" 
         border 
         style="width: 100%"
-        height="70vh"
+        height="60vh"
       >
         <el-table-column prop="displayUrl" label="笔记链接" min-width="500">
           <template #default="{ row }">
@@ -791,6 +811,28 @@ onMounted(() => {
           </template>
         </el-table-column>
       </el-table>
+      
+      <div class="pagination-wrapper">
+        <el-pagination
+          small
+          layout="prev, pager, next"
+          :page-size="20"
+          :total="pagination.total"
+          :current-page="pagination.current_page"
+          @current-change="fetchAuthorNotes"
+          hide-on-single-page
+        />
+        
+        <el-button
+          v-if="pagination.has_more"
+          type="primary"
+          @click="loadMoreNotes"
+          :loading="loading"
+          class="load-more-btn"
+        >
+          加载更多
+        </el-button>
+      </div>
       
       <template #footer>
         <el-button
@@ -886,5 +928,16 @@ onMounted(() => {
 
 .el-dialog__body {
   padding-top: 10px;
+}
+
+.pagination-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 15px;
+}
+
+.load-more-btn {
+  margin-left: 15px;
 }
 </style>
