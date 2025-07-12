@@ -272,6 +272,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       
       // 如果没有更多数据则停止
       if (!hasMore) {
+        progress.value.total = totalFetched
         progress.value.current = progress.value.total
         updateProgress('已获取全部笔记', 'success')
         break
