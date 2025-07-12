@@ -62,7 +62,10 @@ const formData = ref({
   max_count: 30
 })
 
-const loading = ref(false)
+const loading = ref({
+  fetchNotes: false,
+  updateRecords: false
+})
 const showProgressDialog = ref(false)
 const showAuthorNotesDialog = ref(false)
 const authorNotes = ref([])
@@ -122,17 +125,14 @@ const callXhsDetailApi = async (url) => {
 // 调用小红书作者笔记API
 const callXhsAuthorNotesApi = async (cursor = '') => {
   try {
-    // 确保cursor是字符串
     const cleanCursor = typeof cursor === 'string' ? cursor : ''
     
-    const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes_1000', {
+    const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         url: formData.value.author_url,
         cookie: formData.value.cookie,
-        likes_count: formData.value.likes_count,
-        max_count: formData.value.max_count,
         cursor: cleanCursor
       }),
     })
@@ -152,17 +152,8 @@ const callXhsAuthorNotesApi = async (cursor = '') => {
   }
 }
 
-// 处理页码变化
-const handlePageChange = (page) => {
-  console.log('页码变化:', page)
-  // 第一页使用空cursor，其他页使用当前cursor
-  const cursor = page === 1 ? '' : pagination.value.cursor
-  fetchAuthorNotes(cursor, false)
-}
-
-// 获取作者笔记
+// 获取作者笔记并自动导入
 const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
-  // 防御：确保cursor是字符串
   const cleanCursor = typeof cursor === 'string' ? cursor : ''
   
   if (!formData.value.cookie) {
@@ -176,61 +167,135 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
   }
 
   try {
-    loading.value = true
-    if (!isLoadMore) {
-      resetProgress()
-      if (cleanCursor === '') { // 只有全新加载时清空数据
-        authorNotes.value = []
-      }
-      pagination.value.current_page = 1
-    }
+    loading.value.fetchNotes = true
+    resetProgress()
     
     updateProgress('正在获取作者笔记...')
     
-    const result = await callXhsAuthorNotesApi(cleanCursor)
-    if (!result || !result.notes) {
-      updateProgress('获取作者笔记失败', 'exception')
+    // 获取表格信息
+    const { tableId } = await bitable.base.getSelection()
+    if (!tableId) {
+      updateProgress('请先选择数据表', 'exception')
+      loading.value.fetchNotes = false
       return
     }
+
+    const table = await bitable.base.getTable(tableId)
+    const allFields = await table.getFieldMetaList()
+    let linkField = allFields.find(f => f.name === '链接')
     
-    const newNotes = result.notes.map(noteUrl => ({
-      rawUrl: noteUrl,
-      displayUrl: noteUrl
-    }))
+    // 如果不存在链接字段则创建
+    if (!linkField) {
+      updateProgress('正在创建链接字段...')
+      linkField = await table.addField({
+        type: FieldType.Url,
+        name: '链接'
+      })
+    }
     
-    if (isLoadMore) {
-      authorNotes.value = [...authorNotes.value, ...newNotes]
-    } else {
-      if (cleanCursor === '') { // 全新加载
-        authorNotes.value = newNotes
-      } else {
-        // 分页加载，保留现有数据
+    showProgressDialog.value = true
+    
+    let totalFetched = 0
+    let currentCursor = cleanCursor
+    let hasMore = true
+    
+    while (hasMore && totalFetched < formData.value.max_count) {
+      const result = await callXhsAuthorNotesApi(currentCursor)
+      if (!result || !result.notes) {
+        updateProgress('获取作者笔记失败', 'exception')
+        break
+      }
+      
+      // 处理每个笔记，获取详情并过滤
+      const processedNotes = []
+      for (const noteUrl of result.notes) {
+        if (totalFetched >= formData.value.max_count) break
+        
+        try {
+          updateProgress(`获取笔记详情: ${noteUrl}`)
+          const noteDetail = await callXhsDetailApi(noteUrl)
+          
+          if (!noteDetail) {
+            progress.value.failed++
+            updateProgress(`获取笔记详情失败: ${noteUrl}`, 'warning')
+            continue
+          }
+          
+          // 检查点赞数是否满足条件
+          const likeCount = parseNumberWithUnits(noteDetail.like_count || 0)
+          if (likeCount < formData.value.likes_count) {
+            progress.value.skipped++
+            updateProgress(`跳过笔记: 点赞数 ${likeCount} 小于设定值 ${formData.value.likes_count}`)
+            continue
+          }
+          
+          processedNotes.push({
+            rawUrl: noteUrl,
+            displayUrl: noteUrl,
+            detail: noteDetail
+          })
+          totalFetched++
+          
+        } catch (err) {
+          progress.value.failed++
+          console.error(`处理笔记失败:`, err)
+          updateProgress(`处理笔记失败: ${err.message}`, 'exception')
+        }
+      }
+      
+      // 更新分页信息
+      currentCursor = result.cursor || ''
+      hasMore = result.has_more || false
+      
+      // 自动导入过滤后的笔记
+      if (processedNotes.length > 0) {
+        updateProgress(`正在导入 ${processedNotes.length} 条笔记...`)
+        
+        const records = processedNotes.map(note => ({
+          fields: {
+            [linkField.id]: [{
+              text: note.displayUrl,
+              link: note.rawUrl,
+              type: 'url'
+            }],
+            // 可以在这里添加其他字段
+            // ...(await formatXhsDataToFields(note.detail, allFields, table))
+          }
+        }))
+        
+        try {
+          await table.addRecords(records)
+          progress.value.success += processedNotes.length
+          updateProgress(`成功导入 ${processedNotes.length} 条笔记`, 'success')
+        } catch (err) {
+          console.error('批量导入失败:', err)
+          progress.value.failed += processedNotes.length
+          updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
+        }
+      }
+      
+      progress.value.current = totalFetched
+      progress.value.total = formData.value.max_count
+      updateProgressPercent()
+      
+      // 检查是否达到最大数量
+      if (totalFetched >= formData.value.max_count) {
+        updateProgress(`已达到最大获取数量 ${formData.value.max_count}`, 'success')
+        break
+      }
+      
+      // 如果没有更多数据则停止
+      if (!hasMore) {
+        updateProgress('已获取全部笔记', 'success')
+        break
       }
     }
-    
-    // 更新分页信息
-    pagination.value = {
-      cursor: result.cursor || '',
-      has_more: result.has_more || false,
-      current_page: isLoadMore ? pagination.value.current_page + 1 : 1,
-      total: result.total_count || (isLoadMore ? pagination.value.total + newNotes.length : newNotes.length)
-    }
-    
-    showAuthorNotesDialog.value = true
-    updateProgress('获取作者笔记成功', 'success')
     
   } catch (error) {
     console.error('获取作者笔记失败:', error)
     updateProgress(`获取作者笔记失败: ${error.message}`, 'exception')
   } finally {
-    loading.value = false
-  }
-}
-
-// 加载更多笔记
-const loadMoreNotes = () => {
-  if (pagination.value.has_more) {
-    fetchAuthorNotes(pagination.value.cursor, true)
+    loading.value.fetchNotes = false
   }
 }
 
@@ -248,21 +313,21 @@ const updateRecords = async () => {
   }
 
   try {
-    loading.value = true
+    loading.value.updateRecords = true
     resetProgress()
     updateProgress('正在初始化处理...')
 
     const { tableId, viewId } = await bitable.base.getSelection()
     if (!tableId) {
       updateProgress('请先选择数据表', 'exception')
-      loading.value = false
+      loading.value.updateRecords = false
       return
     }
 
     const recordIds = await bitable.ui.selectRecordIdList(tableId, viewId)
     if (!recordIds?.length) {
       updateProgress('请选择要更新的记录', 'exception')
-      loading.value = false
+      loading.value.updateRecords = false
       return
     }
 
@@ -272,7 +337,7 @@ const updateRecords = async () => {
     const linkFieldMeta = allFields.find(f => f.name === '链接')
     if (!linkFieldMeta) {
       updateProgress('未找到"链接"字段', 'exception')
-      loading.value = false
+      loading.value.updateRecords = false
       return
     }
 
@@ -339,7 +404,7 @@ const updateRecords = async () => {
     console.error('全局错误：', err)
     updateProgress(`处理过程中发生错误: ${err.message}`, 'exception')
   } finally {
-    loading.value = false
+    loading.value.updateRecords = false
   }
 }
 
@@ -491,98 +556,6 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
   return fieldMap
 }
 
-// 导入作者笔记到表格
-const importAuthorNotesToTable = async () => {
-  if (!authorNotes.value.length) {
-    updateProgress('没有可导入的笔记数据', 'warning')
-    return
-  }
-
-  try {
-    loading.value = true
-    resetProgress()
-    updateProgress('准备导入笔记数据...')
-    
-    const { tableId, viewId } = await bitable.base.getSelection()
-    if (!tableId) {
-      updateProgress('请先选择数据表', 'exception')
-      loading.value = false
-      return
-    }
-
-    const table = await bitable.base.getTable(tableId)
-    const allFields = await table.getFieldMetaList()
-
-    let linkField = allFields.find(f => f.name === '链接')
-    if (!linkField) {
-      updateProgress('正在创建链接字段...')
-      linkField = await table.addField({
-        type: FieldType.Url,
-        name: '链接'
-      })
-    }
-
-    progress.value.total = authorNotes.value.length
-    showProgressDialog.value = true
-    updateProgress(`开始导入 ${authorNotes.value.length} 条笔记...`)
-
-    const batchSize = 10
-    for (let i = 0; i < authorNotes.value.length; i += batchSize) {
-      const batchNotes = authorNotes.value.slice(i, i + batchSize)
-      
-      const records = batchNotes.map(note => ({
-        fields: {
-          [linkField.id]: [{
-            text: note.displayUrl,
-            link: note.rawUrl,
-            type: 'url'
-          }]
-        }
-      }))
-
-      try {
-        updateProgress(`正在导入第 ${i + 1}-${i + batchNotes.length} 条笔记...`)
-        await table.addRecords(records)
-        progress.value.success += batchNotes.length
-      } catch (err) {
-        console.error('批量导入失败:', err)
-        progress.value.failed += batchNotes.length
-        updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
-        
-        for (const note of batchNotes) {
-          try {
-            await table.addRecord({
-              fields: {
-                [linkField.id]: [{
-                  text: note.displayUrl,
-                  link: note.rawUrl
-                }]
-              }
-            })
-            progress.value.success++
-          } catch (e) {
-            progress.value.failed++
-            console.error('单条导入失败:', note.rawUrl, e)
-          }
-          progress.value.current++
-          updateProgressPercent()
-        }
-      } finally {
-        progress.value.current += batchNotes.length
-        updateProgressPercent()
-      }
-    }
-
-    updateProgress('笔记导入完成!', progress.value.failed > 0 ? 'warning' : 'success')
-  } catch (err) {
-    console.error('导入笔记出错:', err)
-    updateProgress(`导入失败: ${err.message}`, 'exception')
-  } finally {
-    loading.value = false
-    showAuthorNotesDialog.value = false
-  }
-}
-
 // 复制到剪贴板
 const copyToClipboard = (text) => {
   navigator.clipboard.writeText(text)
@@ -683,7 +656,7 @@ onMounted(() => {
     <el-alert title="使用说明" type="info" :closable="false">
       1. 输入小红书Cookie和作者主页URL<br />
       2. 设置筛选条件（点赞数、获取数量）<br />
-      3. 获取笔记后可以导入到表格<br />
+      3. 获取笔记后会自动导入到表格<br />
       4. 也可以直接更新已有链接的笔记数据
     </el-alert>
 
@@ -736,7 +709,7 @@ onMounted(() => {
         <el-button
           type="primary"
           @click="() => fetchAuthorNotes('', false)"
-          :loading="loading"
+          :loading="loading.fetchNotes"
           :disabled="!formData.cookie || !formData.author_url"
           size="large"
         >
@@ -747,7 +720,7 @@ onMounted(() => {
         <el-button
           type="success"
           @click="updateRecords"
-          :loading="loading"
+          :loading="loading.updateRecords"
           :disabled="!formData.cookie"
           size="large"
         >
@@ -786,7 +759,7 @@ onMounted(() => {
         <el-button
           type="primary"
           @click="showProgressDialog = false"
-          :disabled="loading"
+          :disabled="loading.fetchNotes || loading.updateRecords"
         >
           关闭
         </el-button>
@@ -837,26 +810,9 @@ onMounted(() => {
           @current-change="handlePageChange"
           hide-on-single-page
         />
-        
-        <el-button
-          v-if="pagination.has_more"
-          type="primary"
-          @click="loadMoreNotes"
-          :loading="loading"
-          class="load-more-btn"
-        >
-          加载更多
-        </el-button>
       </div>
       
       <template #footer>
-        <el-button
-          type="primary"
-          @click="importAuthorNotesToTable"
-          :loading="loading"
-        >
-          导入到表格
-        </el-button>
         <el-button
           @click="showAuthorNotesDialog = false"
         >
@@ -950,9 +906,5 @@ onMounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-top: 15px;
-}
-
-.load-more-btn {
-  margin-left: 15px;
 }
 </style>
