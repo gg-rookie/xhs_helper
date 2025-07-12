@@ -257,7 +257,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       }
       
       progress.value.current = totalFetched
-      // progress.value.total = formData.value.max_count
+      progress.value.total = formData.value.max_count
       // progress.value.total = Math.min(
       //   totalFetched + (hasMore ? 1 : 0), // 如果还有数据，预留1个位置
       //   formData.value.max_count
