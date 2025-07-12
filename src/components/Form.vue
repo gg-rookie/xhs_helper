@@ -122,37 +122,7 @@ const callXhsDetailApi = async (url) => {
   }
 }
 
-// 调用小红书作者笔记API
-const callXhsAuthorNotesApi = async (cursor = '') => {
-  try {
-    const cleanCursor = typeof cursor === 'string' ? cursor : ''
-    
-    const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        url: formData.value.author_url,
-        cookie: formData.value.cookie,
-        cursor: cleanCursor
-      }),
-    })
-    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
-    const result = await response.json()
-    
-    if (checkCookieExpired(result)) {
-      ElMessage.error('Cookie已过期，请更新Cookie')
-      throw new Error('Cookie已过期')
-    }
-    
-    if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
-    return result.data
-  } catch (error) {
-    console.error('API调用失败:', error)
-    return null
-  }
-}
-
-// 获取作者笔记并自动导入
+// 修改后的获取作者笔记并自动导入函数
 const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
   const cleanCursor = typeof cursor === 'string' ? cursor : ''
   
@@ -182,16 +152,27 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
 
     const table = await bitable.base.getTable(tableId)
     const allFields = await table.getFieldMetaList()
-    let linkField = allFields.find(f => f.name === '链接')
     
-    // 如果不存在链接字段则创建
-    if (!linkField) {
-      updateProgress('正在创建链接字段...')
-      linkField = await table.addField({
-        type: FieldType.Url,
-        name: '链接'
-      })
+    // 确保关键字段存在，不存在则创建
+    const ensureField = async (fieldName, fieldType) => {
+      let field = allFields.find(f => f.name === fieldName)
+      if (!field) {
+        updateProgress(`正在创建字段: ${fieldName}...`)
+        field = await table.addField({
+          type: fieldType,
+          name: fieldName
+        })
+      }
+      return field
     }
+
+    // 确保所有需要的字段都存在
+    const linkField = await ensureField('链接', FieldType.Url)
+    const titleField = await ensureField('标题', FieldType.Text)
+    const authorField = await ensureField('博主', FieldType.Text)
+    const likesField = await ensureField('喜欢数', FieldType.Number)
+    const coverField = await ensureField('封面图', FieldType.Url)
+    const noteIdField = await ensureField('笔记ID', FieldType.Text)
     
     showProgressDialog.value = true
     
@@ -201,39 +182,46 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
     
     while (hasMore && totalFetched < formData.value.max_count) {
       const result = await callXhsAuthorNotesApi(currentCursor)
-      if (!result || !result.notes) {
+      if (!result || !result.items) {
         updateProgress('获取作者笔记失败', 'exception')
         break
       }
       
-      // 处理每个笔记，获取详情并过滤
-      const processedNotes = []
-      for (const noteUrl of result.notes) {
+      // 处理每个笔记
+      const recordsToAdd = []
+      for (const note of result.items) {
         if (totalFetched >= formData.value.max_count) break
         
         try {
-          updateProgress(`获取笔记详情: ${noteUrl}`)
-          const noteDetail = await callXhsDetailApi(noteUrl)
-          
-          if (!noteDetail) {
-            progress.value.failed++
-            updateProgress(`获取笔记详情失败: ${noteUrl}`, 'warning')
-            continue
-          }
-          
           // 检查点赞数是否满足条件
-          const likeCount = parseNumberWithUnits(noteDetail.like_count || 0)
+          const likeCount = parseNumberWithUnits(note.like_count || "0")
           if (likeCount < formData.value.likes_count) {
             progress.value.skipped++
             updateProgress(`跳过笔记: 点赞数 ${likeCount} 小于设定值 ${formData.value.likes_count}`)
             continue
           }
           
-          processedNotes.push({
-            rawUrl: noteUrl,
-            displayUrl: noteUrl,
-            detail: noteDetail
-          })
+          // 准备记录数据
+          const recordData = {
+            fields: {
+              [linkField.id]: [{
+                text: note.title || '小红书笔记',
+                link: note.note_url,
+                type: 'url'
+              }],
+              [titleField.id]: note.title || '',
+              [authorField.id]: note.author_nickname || '',
+              [likesField.id]: likeCount,
+              [coverField.id]: [{
+                text: '封面图',
+                link: note.cover_url_default || note.cover_url_pre || '',
+                type: 'url'
+              }],
+              [noteIdField.id]: note.note_id || ''
+            }
+          }
+          
+          recordsToAdd.push(recordData)
           totalFetched++
           
         } catch (err) {
@@ -247,29 +235,22 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       currentCursor = result.cursor || ''
       hasMore = result.has_more || false
       
-      // 自动导入过滤后的笔记
-      if (processedNotes.length > 0) {
-        updateProgress(`正在导入 ${processedNotes.length} 条笔记...`)
-        
-        const records = processedNotes.map(note => ({
-          fields: {
-            [linkField.id]: [{
-              text: note.displayUrl,
-              link: note.rawUrl,
-              type: 'url'
-            }],
-            // 可以在这里添加其他字段
-            // ...(await formatXhsDataToFields(note.detail, allFields, table))
-          }
-        }))
+      // 批量导入笔记
+      if (recordsToAdd.length > 0) {
+        updateProgress(`正在导入 ${recordsToAdd.length} 条笔记...`)
         
         try {
-          await table.addRecords(records)
-          progress.value.success += processedNotes.length
-          updateProgress(`成功导入 ${processedNotes.length} 条笔记`, 'success')
+          // 分批处理，避免一次性写入太多数据
+          const batchSize = 20
+          for (let i = 0; i < recordsToAdd.length; i += batchSize) {
+            const batch = recordsToAdd.slice(i, i + batchSize)
+            await table.addRecords(batch)
+            progress.value.success += batch.length
+            updateProgress(`成功导入 ${batch.length} 条笔记 (${i + batch.length}/${recordsToAdd.length})`, 'success')
+          }
         } catch (err) {
           console.error('批量导入失败:', err)
-          progress.value.failed += processedNotes.length
+          progress.value.failed += recordsToAdd.length
           updateProgress(`部分笔记导入失败: ${err.message}`, 'warning')
         }
       }
@@ -296,6 +277,37 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
     updateProgress(`获取作者笔记失败: ${error.message}`, 'exception')
   } finally {
     loading.value.fetchNotes = false
+  }
+}
+
+// 修改后的API调用函数
+const callXhsAuthorNotesApi = async (cursor = '') => {
+  try {
+    const cleanCursor = typeof cursor === 'string' ? cursor : ''
+    
+    const response = await fetch('https://nibelungen.site/xhs/xhs_author_notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        url: formData.value.author_url,
+        cookie: formData.value.cookie,
+        cursor: cleanCursor
+      }),
+    })
+    
+    if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`)
+    const result = await response.json()
+    
+    if (checkCookieExpired(result)) {
+      ElMessage.error('Cookie已过期，请更新Cookie')
+      throw new Error('Cookie已过期')
+    }
+    
+    if (result.code !== 0) throw new Error(result.msg || 'API调用失败')
+    return result.data
+  } catch (error) {
+    console.error('API调用失败:', error)
+    return null
   }
 }
 
