@@ -205,7 +205,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
           const recordData = {
             fields: {
               [linkField.id]: [{
-                text: note.title || '小红书笔记',
+                text: note.note_url,
                 link: note.note_url,
                 type: 'url'
               }],
@@ -233,8 +233,9 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       
       // 更新分页信息
       currentCursor = result.cursor || ''
-      hasMore = result.has_more || false
-      
+      // hasMore = result.has_more || false
+      hasMore =  false
+
       // 批量导入笔记
       if (recordsToAdd.length > 0) {
         updateProgress(`正在导入 ${recordsToAdd.length} 条笔记...`)
