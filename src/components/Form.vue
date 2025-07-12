@@ -242,7 +242,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
         
         try {
           // 分批处理，避免一次性写入太多数据
-          const batchSize = 20
+          const batchSize = 30
           for (let i = 0; i < recordsToAdd.length; i += batchSize) {
             const batch = recordsToAdd.slice(i, i + batchSize)
             await table.addRecords(batch)
@@ -257,7 +257,11 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       }
       
       progress.value.current = totalFetched
-      progress.value.total = formData.value.max_count
+      // progress.value.total = formData.value.max_count
+      // progress.value.total = Math.min(
+      //   totalFetched + (hasMore ? 1 : 0), // 如果还有数据，预留1个位置
+      //   formData.value.max_count
+      // )
       updateProgressPercent()
       
       // 检查是否达到最大数量
@@ -268,6 +272,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       
       // 如果没有更多数据则停止
       if (!hasMore) {
+        progress.value.current = progress.value.total
         updateProgress('已获取全部笔记', 'success')
         break
       }
