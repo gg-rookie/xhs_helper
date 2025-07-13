@@ -720,23 +720,25 @@ onMounted(() => {
           />
         </el-form-item>
         
-        <el-form-item label="最小点赞数">
-          <el-input-number
-            v-model="formData.likes_count"
-            :min="0"
-            :max="100000"
-            :step="100"
-          />
-        </el-form-item>
-        
-        <el-form-item label="最大获取数量">
-          <el-input-number
-            v-model="formData.max_count"
-            :min="1"
-            :max="1000"
-            :step="30"
-          />
-        </el-form-item>
+        <div class="amount-area">
+          <el-form-item label="最小点赞数">
+            <el-input-number
+              v-model="formData.likes_count"
+              :min="0"
+              :max="100000"
+              :step="100"
+            />
+          </el-form-item>
+          
+          <el-form-item label="最大获取数量">
+            <el-input-number
+              v-model="formData.max_count"
+              :min="1"
+              :max="1000"
+              :step="30"
+            />
+          </el-form-item>
+        </div>
       </el-form>
 
       <div class="action-area">
@@ -764,41 +766,47 @@ onMounted(() => {
       </div>
     </el-card>
 
-    <el-dialog
-      v-model="showProgressDialog"
-      title="处理进度"
-      width="400px"
-      :close-on-click-modal="false"
-      :close-on-press-escape="false"
-      :show-close="false"
-    >
-      <water-tank-progress
-        :percent="progress.percent"
-        :status="progress.status"
-        :size="180"
-      />
-      <div class="progress-details">
-        <div class="progress-message">{{ progress.message }}</div>
-        <div class="progress-stats">
-          <div class="stats-row">
-            <div>进度: {{ progress.current }}/{{ progress.total }}</div>
-            <span class="success">成功: {{ progress.success }}</span>
-            <span class="failed">失败: {{ progress.failed }}</span>
-            <span class="skipped">跳过: {{ progress.skipped }}</span>
-          </div>
+  <el-dialog
+  v-model="showProgressDialog"
+  title="处理进度"
+  width="400px"
+  :close-on-click-modal="false"
+  :close-on-press-escape="false"
+  :show-close="false"
+  custom-class="centered-dialog"  
+>
+  <div class="dialog-content">
+    <water-tank-progress
+      :percent="progress.percent"
+      :status="progress.status"
+      :size="180"
+      class="progress-circle"
+    />
+    <div class="progress-details">
+      <div class="progress-message">{{ progress.message }}</div>
+      <div class="progress-stats">
+        <div class="stats-row">
+          <div>进度: {{ progress.current }}/{{ progress.total }}</div>
+          <span class="success">成功: {{ progress.success }}</span>
+          <span class="failed">失败: {{ progress.failed }}</span>
+          <span class="skipped">跳过: {{ progress.skipped }}</span>
         </div>
       </div>
+    </div>
+  </div>
 
-      <template #footer>
-        <el-button
-          type="primary"
-          @click="showProgressDialog = false"
-          :disabled="loading.fetchNotes || loading.updateRecords"
-        >
-          关闭
-        </el-button>
-      </template>
-    </el-dialog>
+  <template #footer>
+    <div class="dialog-footer">  <!-- 新增 footer 容器 -->
+      <el-button
+        type="primary"
+        @click="showProgressDialog = false"
+        :disabled="loading.fetchNotes || loading.updateRecords"
+      >
+        关闭
+      </el-button>
+    </div>
+  </template>
+</el-dialog>
     
     <el-dialog
       v-model="showAuthorNotesDialog"
@@ -858,43 +866,63 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.container {
-  padding: 20px;
-  max-width: 1000px;
-  margin: 0 auto;
+.centered-dialog .el-dialog__body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;  /* 水平居中 */
+  padding: 20px 25px;   /* 调整内边距 */
+}
+
+/* 内容容器 */
+.dialog-content {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;  /* 元素间距 */
+}
+
+/* 进度圆圈 */
+.progress-circle {
+  margin: 0 auto;  /* 双重保障居中 */
+}
+
+/* 进度详情 */
+.progress-details {
+  text-align: center;
+  width: 100%;
+}
+
+/* 统计行 */
+.stats-row {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-top: 8px;
+}
+
+/* 底部按钮居中 */
+.dialog-footer {
+  text-align: center;
 }
 
 .config-card {
   margin-bottom: 20px;
 }
 
+.amount-area {
+    display: flex;
+    justify-content: flex-start;
+    margin-top: 20px;
+    gap: 20px;
+}
+
 .action-area {
   display: flex;
-  justify-content: flex-start;
+  justify-content: space-between;
   margin-top: 20px;
   gap: 20px;
-}
-
-.progress-details {
-  margin-top: 20px;
-  text-align: center;
-}
-
-.progress-message {
-  font-size: 16px;
-  margin-bottom: 10px;
-  font-weight: bold;
-}
-
-.progress-stats {
-  font-size: 14px;
-}
-
-.stats-row {
-  display: flex;
-  justify-content: space-between;
-  margin-top: 10px;
-  flex-wrap: wrap;
 }
 
 .success {
