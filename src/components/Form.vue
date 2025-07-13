@@ -233,8 +233,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
       
       // 更新分页信息
       currentCursor = result.cursor || ''
-      // hasMore = result.has_more || false
-      hasMore =  false
+      hasMore = result.has_more || false
 
       // 批量导入笔记
       if (recordsToAdd.length > 0) {
