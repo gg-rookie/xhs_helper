@@ -87,6 +87,18 @@ const progress = ref({
   message: '准备开始处理...'
 })
 
+// 1. 定义 sleep 函数（支持随机时间）
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// 2. 生成 3～5 秒的随机等待时间（单位：毫秒）
+function getRandomWaitTime() {
+  const min = 3000; // 3秒
+  const max = 5000; // 5秒
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 // 检查API响应是否cookie过期
 const checkCookieExpired = (response) => {
   if (response.code === -1 && response.msg.includes('登录')) {
@@ -277,6 +289,9 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
         updateProgress('已获取全部笔记', 'success')
         break
       }
+
+      const waitTime = getRandomWaitTime();
+      await sleep(waitTime); 
     }
     
   } catch (error) {
