@@ -205,6 +205,8 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
         if (totalFetched >= formData.value.max_count) break
         
         try {
+          totalFetched++
+
           // 检查点赞数是否满足条件
           const likeCount = parseNumberWithUnits(note.like_count || "0")
           if (likeCount < formData.value.likes_count) {
@@ -233,9 +235,7 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
             }
           }
           
-          recordsToAdd.push(recordData)
-          totalFetched++
-          
+          recordsToAdd.push(recordData)          
         } catch (err) {
           progress.value.failed++
           console.error(`处理笔记失败:`, err)
@@ -724,7 +724,7 @@ onMounted(() => {
           <el-input-number
             v-model="formData.likes_count"
             :min="0"
-            :max="10000"
+            :max="100000"
             :step="100"
           />
         </el-form-item>
@@ -734,7 +734,7 @@ onMounted(() => {
             v-model="formData.max_count"
             :min="1"
             :max="1000"
-            :step="10"
+            :step="30"
           />
         </el-form-item>
       </el-form>
