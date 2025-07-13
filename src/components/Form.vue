@@ -194,14 +194,14 @@ const fetchAuthorNotes = async (cursor = '', isLoadMore = false) => {
     
     while (hasMore && totalFetched < formData.value.max_count) {
       const result = await callXhsAuthorNotesApi(currentCursor)
-      if (!result || !result.notes) {
+      if (!result || !result.items) {
         updateProgress('获取作者笔记失败', 'exception')
         break
       }
       
       // 处理每个笔记
       const recordsToAdd = []
-      for (const note of result.notes) {
+      for (const note of result.items) {
         if (totalFetched >= formData.value.max_count) break
         
         try {
