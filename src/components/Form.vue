@@ -52,7 +52,6 @@ const saveCookieToStorage = (cookie) => {
 
 const loading = ref({
   fetchNotes: false,
-  countinuefetchNotes: false,
   updateRecords: false
 })
 const showProgressDialog = ref(false)
@@ -302,16 +301,12 @@ const fetchAuthorNotes = async (cursor = '', isContinue = false) => {
   }
 }
 
-// 继续获取函数
-const continueFetchNotes = async () => {
-  await fetchAuthorNotes(cursorInput.value, true)
-  loading.countinuefetchNotes = false
-}
-
 // 保存作者URL
 const handleAuthorUrlChange = (value) => {
   formData.value.author_url = value
   saveToStorage('author_url', value)
+  saveToStorage('last_cursor', '')
+  cursorInput.value = ''
 }
 
 // 保存cookie
@@ -719,7 +714,7 @@ onMounted(() => {
           />
         </el-form-item>
         
-        <el-form-item label="Cursor (用于继续获取)">
+        <el-form-item label="Cursor (用于继续翻页获取)">
           <el-input
             v-model="cursorInput"
             placeholder="输入上次获取的cursor"
@@ -751,24 +746,13 @@ onMounted(() => {
       <div class="action-area">
         <el-button
           type="primary"
-          @click="() => fetchAuthorNotes('', false)"
+          @click="() => fetchAuthorNotes(cursorInput, false)"
           :loading="loading.fetchNotes"
           :disabled="!formData.cookie || !formData.author_url"
           size="large"
         >
           <el-icon><CircleCheck /></el-icon>
           获取作者笔记
-        </el-button>
-        
-        <el-button
-          type="warning"
-          @click="continueFetchNotes"
-          :loading="loading.countinuefetchNotes"
-          :disabled="!formData.cookie || !cursorInput"
-          size="large"
-        >
-          <el-icon><Refresh /></el-icon>
-          继续获取作者笔记
         </el-button>
         
         <el-button
