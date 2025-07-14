@@ -52,17 +52,11 @@ const saveCookieToStorage = (cookie) => {
 
 const loading = ref({
   fetchNotes: false,
+  countinuefetchNotes: false,
   updateRecords: false
 })
 const showProgressDialog = ref(false)
-const showAuthorNotesDialog = ref(false)
-const authorNotes = ref([])
-const pagination = ref({
-  cursor: '',
-  has_more: false,
-  current_page: 1,
-  total: 0
-})
+
 
 const progress = ref({
   percent: 0,
@@ -89,7 +83,7 @@ function getRandomWaitTime() {
 
 // 检查API响应是否cookie过期
 const checkCookieExpired = (response) => {
-  if (response.code !== 0 || response.msg.includes('登录')) {
+if (response.code !== 0 || ['登录', 'cookie', '过期'].some(str => response.msg.includes(str))) {
     return true
   }
   return false
@@ -148,7 +142,6 @@ const callXhsAuthorNotesApi = async (cursor = '') => {
     return null
   }
 }
-
 
 // 获取作者笔记函数
 const fetchAuthorNotes = async (cursor = '', isContinue = false) => {
@@ -312,6 +305,7 @@ const fetchAuthorNotes = async (cursor = '', isContinue = false) => {
 // 继续获取函数
 const continueFetchNotes = async () => {
   await fetchAuthorNotes(cursorInput.value, true)
+  loading.countinuefetchNotes = false
 }
 
 // 保存作者URL
@@ -605,18 +599,6 @@ const formatXhsDataToFields = async (xhsData, allFields, table) => {
   return fieldMap
 }
 
-// 复制到剪贴板
-const copyToClipboard = (text) => {
-  navigator.clipboard.writeText(text)
-    .then(() => {
-      ElMessage.success('已复制到剪贴板')
-    })
-    .catch(err => {
-      console.error('复制失败:', err)
-      ElMessage.error('复制失败')
-    })
-}
-
 // 重置进度
 const resetProgress = () => {
   progress.value = {
@@ -781,7 +763,7 @@ onMounted(() => {
         <el-button
           type="warning"
           @click="continueFetchNotes"
-          :loading="loading.fetchNotes"
+          :loading="loading.countinuefetchNotes"
           :disabled="!formData.cookie || !cursorInput"
           size="large"
         >
@@ -802,100 +784,45 @@ onMounted(() => {
       </div>
     </el-card>
 
-  <el-dialog
-  v-model="showProgressDialog"
-  title="处理进度"
-  width="400px"
-  :close-on-click-modal="false"
-  :close-on-press-escape="false"
-  :show-close="false"
-  custom-class="centered-dialog"  
->
-  <div class="dialog-content">
-    <water-tank-progress
-      :percent="progress.percent"
-      :status="progress.status"
-      :size="180"
-      class="progress-circle"
-    />
-    <div class="progress-details">
-      <div class="progress-message">{{ progress.message }}</div>
-      <div class="progress-stats">
-        <div class="stats-row">
-          <div>进度: {{ progress.current }}/{{ progress.total }}</div>
-          <span class="success">成功: {{ progress.success }}</span>
-          <span class="failed">失败: {{ progress.failed }}</span>
-          <span class="skipped">跳过: {{ progress.skipped }}</span>
+    <el-dialog
+      v-model="showProgressDialog"
+      title="处理进度"
+      width="400px"
+      :close-on-click-modal="false"
+      :close-on-press-escape="false"
+      :show-close="false"
+      custom-class="centered-dialog"  
+    >
+      <div class="dialog-content">
+        <water-tank-progress
+          :percent="progress.percent"
+          :status="progress.status"
+          :size="180"
+          class="progress-circle"
+        />
+        <div class="progress-details">
+          <div class="progress-message">{{ progress.message }}</div>
+          <div class="progress-stats">
+            <div class="stats-row">
+              <div>进度: {{ progress.current }}/{{ progress.total }}</div>
+              <span class="success">成功: {{ progress.success }}</span>
+              <span class="failed">失败: {{ progress.failed }}</span>
+              <span class="skipped">跳过: {{ progress.skipped }}</span>
+            </div>
+          </div>
         </div>
       </div>
-    </div>
-  </div>
 
-  <template #footer>
-    <div class="dialog-footer">  <!-- 新增 footer 容器 -->
-      <el-button
-        type="primary"
-        @click="showProgressDialog = false"
-        :disabled="loading.fetchNotes || loading.updateRecords"
-      >
-        关闭
-      </el-button>
-    </div>
-  </template>
-</el-dialog>
-    
-    <el-dialog
-      v-model="showAuthorNotesDialog"
-      title="作者笔记列表"
-      width="80%"
-      top="5vh"
-    >
-      <el-table 
-        :data="authorNotes" 
-        border 
-        style="width: 100%"
-        height="60vh"
-      >
-        <el-table-column prop="displayUrl" label="笔记链接" min-width="500">
-          <template #default="{ row }">
-            <el-link 
-              type="primary" 
-              :href="row.rawUrl" 
-              target="_blank" 
-              :underline="false"
-              class="note-link"
-            >
-              {{ row.displayUrl }}
-            </el-link>
-            <el-button
-              size="small"
-              @click="copyToClipboard(row.rawUrl)"
-              class="copy-btn"
-            >
-              复制
-            </el-button>
-          </template>
-        </el-table-column>
-      </el-table>
-      
-      <div class="pagination-wrapper">
-        <el-pagination
-          small
-          layout="prev, pager, next"
-          :page-size="20"
-          :total="pagination.total"
-          :current-page="pagination.current_page"
-          @current-change="handlePageChange"
-          hide-on-single-page
-        />
-      </div>
-      
       <template #footer>
-        <el-button
-          @click="showAuthorNotesDialog = false"
-        >
-          关闭
-        </el-button>
+        <div class="dialog-footer">
+          <el-button
+            type="primary"
+            @click="showProgressDialog = false"
+            :disabled="loading.fetchNotes || loading.updateRecords"
+          >
+            关闭
+          </el-button>
+        </div>
       </template>
     </el-dialog>
   </div>
