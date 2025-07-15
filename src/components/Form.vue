@@ -102,6 +102,8 @@ function getRandomWaitTime() {
 // 检查API响应是否cookie过期
 const checkCookieExpired = (response) => {
   if (response.code === -1 && response.msg.includes('登录')) {
+    saveCookieToStorage('')
+    formData.value.cookie = ''
     return true
   }
   return false
