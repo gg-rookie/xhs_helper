@@ -677,8 +677,6 @@ onMounted(() => {
 
 <template>
   <div class="container">
-    <h1>小红书助手 - 详情批量更新</h1>
-
     <el-alert title="使用说明" type="info" :closable="false">
       1. 输入小红书Cookie和作者主页URL<br />
       2. 设置筛选条件（点赞数、获取数量）<br />
